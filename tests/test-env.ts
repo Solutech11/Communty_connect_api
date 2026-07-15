@@ -1,0 +1,17 @@
+process.env.NODE_ENV = "test";
+process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/community_connect_test";
+process.env.REDIS_URL = "redis://127.0.0.1:6379/15";
+process.env.JWT_ACCESS_SECRET = "a".repeat(64);
+process.env.JWT_REFRESH_SECRET = "b".repeat(64);
+process.env.OTP_PEPPER = "c".repeat(32);
+process.env.FIELD_ENCRYPTION_KEY = "01".repeat(32);
+process.env.PAYSTACK_SECRET_KEY = "sk_test_placeholder";
+process.env.PAYSTACK_PUBLIC_KEY = "pk_test_placeholder";
+process.env.PAYSTACK_CALLBACK_URL = "communityconnect://wallet/top-up/callback";
+process.env.CLOUDINARY_CLOUD_NAME = "test";
+process.env.CLOUDINARY_API_KEY = "test";
+process.env.CLOUDINARY_API_SECRET = "test";
+process.env.ZEPTOMAIL_SEND_MAIL_TOKEN = "test";
+process.env.MAIL_FROM_ADDRESS = "test@example.com";
+process.env.OPENAI_API_KEY = "test";
+process.env.LOG_LEVEL = "silent";

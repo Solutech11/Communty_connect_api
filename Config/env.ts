@@ -1,0 +1,82 @@
+import "dotenv/config";
+import { z } from "zod";
+
+const durationPattern = /^\d+(s|m|h|d)$/;
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  PORT: z.coerce.number().int().positive().max(65535).default(5000),
+  API_PREFIX: z.string().startsWith("/").default("/api/v1"),
+  APP_NAME: z.string().min(1).default("Community Connect"),
+  APP_BASE_URL: z.string().url().default("http://localhost:5000"),
+  FRONTEND_URLS: z.string().default("http://localhost:8081,http://localhost:19006"),
+  TRUST_PROXY: z.coerce.number().int().min(0).max(3).default(1),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  MONGODB_URI: z.string().min(1),
+  REDIS_URL: z.string().min(1),
+  JWT_ACCESS_SECRET: z.string().min(64),
+  JWT_REFRESH_SECRET: z.string().min(64),
+  JWT_ISSUER: z.string().min(1).default("community-connect-api"),
+  JWT_AUDIENCE: z.string().min(1).default("community-connect-mobile"),
+  ACCESS_TOKEN_TTL: z.string().regex(durationPattern).default("15m"),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(180).default(30),
+  BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
+  OTP_PEPPER: z.string().min(32),
+  FIELD_ENCRYPTION_KEY: z.string().regex(/^[a-fA-F0-9]{64}$/),
+  PAYSTACK_SECRET_KEY: z.string().min(10),
+  PAYSTACK_PUBLIC_KEY: z.string().min(10),
+  PAYSTACK_BASE_URL: z.string().url().default("https://api.paystack.co"),
+  PAYSTACK_CALLBACK_URL: z.string().min(1),
+  PAYSTACK_CURRENCY: z.string().length(3).default("NGN"),
+  MIN_TOPUP_KOBO: z.coerce.number().int().positive().default(10000),
+  MIN_WITHDRAWAL_KOBO: z.coerce.number().int().positive().default(100000),
+  CLOUDINARY_CLOUD_NAME: z.string().min(1),
+  CLOUDINARY_API_KEY: z.string().min(1),
+  CLOUDINARY_API_SECRET: z.string().min(1),
+  ZEPTOMAIL_API_URL: z.string().url().default("https://api.zeptomail.com/v1.1/email"),
+  ZEPTOMAIL_SEND_MAIL_TOKEN: z.string().min(1),
+  MAIL_FROM_ADDRESS: z.string().email(),
+  MAIL_FROM_NAME: z.string().min(1).default("Community Connect"),
+  OPENAI_API_KEY: z.string().min(1),
+  OPENAI_MODEL: z.string().min(1).default("gpt-5-mini"),
+  OPENAI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(100).max(4000).default(800),
+  EXPO_ACCESS_TOKEN: z.string().optional().default(""),
+  MAX_IMAGE_SIZE_BYTES: z.coerce.number().int().positive().default(5242880),
+  JSON_BODY_LIMIT: z.string().default("100kb"),
+  BOOTSTRAP_ADMIN_EMAIL: z.string().email().or(z.literal("")).optional().default(""),
+});
+
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  const issues = parsed.error.issues
+    .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+    .join("\n");
+
+  throw new Error(`Invalid backend environment configuration:\n${issues}`);
+}
+
+if (parsed.data.NODE_ENV === "production") {
+  const unsafePlaceholders = [
+    parsed.data.JWT_ACCESS_SECRET,
+    parsed.data.JWT_REFRESH_SECRET,
+    parsed.data.OTP_PEPPER,
+    parsed.data.PAYSTACK_SECRET_KEY,
+    parsed.data.CLOUDINARY_API_SECRET,
+    parsed.data.ZEPTOMAIL_SEND_MAIL_TOKEN,
+    parsed.data.OPENAI_API_KEY,
+  ].some((value) => /replace|placeholder|change-me/i.test(value));
+
+  if (unsafePlaceholders || /^0{64}$/.test(parsed.data.FIELD_ENCRYPTION_KEY)) {
+    throw new Error("Production cannot start with placeholder secrets or the example encryption key.");
+  }
+}
+
+export const env = {
+  ...parsed.data,
+  allowedOrigins: parsed.data.FRONTEND_URLS.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  isProduction: parsed.data.NODE_ENV === "production",
+  isTest: parsed.data.NODE_ENV === "test",
+};

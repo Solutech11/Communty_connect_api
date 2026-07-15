@@ -1,0 +1,116 @@
+﻿import type { Request, Response } from "express";
+import { FriendshipModel } from "../models/Social/Friendship.model";
+import { UserModel } from "../models/Auth/User.model";
+import { AppError } from "../utils/AppError";
+import { sendSuccess } from "../utils/response.utils";
+import { createNotification } from "../utils/notificationService.utils";
+
+const pairKeyFor = (left: string, right: string): string => [left, right].sort().join(":");
+
+export const listFriends = async (request: Request, response: Response): Promise<Response> => {
+  const records = await FriendshipModel.find({
+    status: "accepted",
+    $or: [{ requesterId: request.auth?.id }, { addresseeId: request.auth?.id }],
+  })
+    .populate("requesterId", "firstName lastName avatarUrl state lga")
+    .populate("addresseeId", "firstName lastName avatarUrl state lga")
+    .sort({ updatedAt: -1 });
+  return sendSuccess(response, 200, "Friends retrieved", { friendships: records });
+};
+
+export const listFriendRequests = async (request: Request, response: Response): Promise<Response> => {
+  const requests = await FriendshipModel.find({ addresseeId: request.auth?.id, status: "pending" })
+    .populate("requesterId", "firstName lastName avatarUrl state lga")
+    .sort({ createdAt: -1 });
+  return sendSuccess(response, 200, "Friend requests retrieved", { requests });
+};
+
+export const suggestions = async (request: Request, response: Response): Promise<Response> => {
+  const links = await FriendshipModel.find({
+    $or: [{ requesterId: request.auth?.id }, { addresseeId: request.auth?.id }],
+  }).lean();
+  const excluded = new Set<string>([request.auth?.id as string]);
+
+  for (const link of links) {
+    excluded.add(link.requesterId.toString());
+    excluded.add(link.addresseeId.toString());
+  }
+
+  const users = await UserModel.find({
+    _id: { $nin: [...excluded] },
+    status: "active",
+  })
+    .select("firstName lastName avatarUrl state lga interests")
+    .limit(20);
+  return sendSuccess(response, 200, "Friend suggestions retrieved", { users });
+};
+
+export const sendFriendRequest = async (request: Request, response: Response): Promise<Response> => {
+  const targetId = (request.params.userId as string);
+
+  if (targetId === request.auth?.id) {
+    throw new AppError(400, "You cannot send a friend request to yourself", "INVALID_FRIEND_REQUEST");
+  }
+
+  if (!(await UserModel.exists({ _id: targetId, status: "active" }))) {
+    throw new AppError(404, "User was not found", "USER_NOT_FOUND");
+  }
+
+  const friendship = await FriendshipModel.create({
+    requesterId: request.auth?.id,
+    addresseeId: targetId,
+    pairKey: pairKeyFor(request.auth?.id as string, targetId),
+  });
+  void createNotification({
+    userId: targetId,
+    type: "connection_request",
+    title: "New connection request",
+    body: "Someone in your community would like to connect.",
+    data: { friendshipId: friendship._id.toString(), route: "Friends" },
+    dedupeKey: `friend-request:${friendship._id.toString()}`,
+  });
+  return sendSuccess(response, 201, "Friend request sent", { friendship });
+};
+
+export const respondToFriendRequest = async (
+  request: Request,
+  response: Response,
+): Promise<Response> => {
+  const status = request.body.action === "accept" ? "accepted" : "declined";
+  const friendship = await FriendshipModel.findOneAndUpdate(
+    { _id: (request.params.id as string), addresseeId: request.auth?.id, status: "pending" },
+    { status, respondedAt: new Date() },
+    { new: true },
+  );
+
+  if (!friendship) {
+    throw new AppError(404, "Pending friend request was not found", "FRIEND_REQUEST_NOT_FOUND");
+  }
+
+  if (status === "accepted") {
+    void createNotification({
+      userId: friendship.requesterId.toString(),
+      type: "connection_accepted",
+      title: "Connection request accepted",
+      body: "You have a new Community Connect friend.",
+      data: { friendshipId: friendship._id.toString(), route: "Friends" },
+      dedupeKey: `friend-accepted:${friendship._id.toString()}`,
+    });
+  }
+
+  return sendSuccess(response, 200, `Friend request ${status}`, { friendship });
+};
+
+export const removeFriend = async (request: Request, response: Response): Promise<Response> => {
+  const result = await FriendshipModel.deleteOne({
+    _id: (request.params.id as string),
+    $or: [{ requesterId: request.auth?.id }, { addresseeId: request.auth?.id }],
+  });
+
+  if (result.deletedCount === 0) {
+    throw new AppError(404, "Friendship was not found", "FRIENDSHIP_NOT_FOUND");
+  }
+
+  return sendSuccess(response, 200, "Friend removed");
+};
+

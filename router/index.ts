@@ -1,0 +1,31 @@
+import { Router } from "express";
+import aiRouter from "./ai/AI.route";
+import authRouter from "./auth/Auth.route";
+import chatRouter from "./chat/Chat.route";
+import communityRouter from "./communities/Community.route";
+import disputeRouter from "./disputes/Dispute.route";
+import eventRouter from "./events/Event.route";
+import friendRouter from "./friends/Friend.route";
+import notificationRouter from "./notifications/Notification.route";
+import uploadRouter from "./uploads/Upload.route";
+import userRouter from "./users/User.route";
+import walletRouter from "./wallet/Wallet.route";
+import webhookRouter from "./webhooks/Webhook.route";
+import ticketRouter from "./tickets/Ticket.route";
+
+const router = Router();
+router.use("/auth", authRouter);
+router.use("/users", userRouter);
+router.use("/events", eventRouter);
+router.use("/tickets", ticketRouter);
+router.use("/communities", communityRouter);
+router.use("/friends", friendRouter);
+router.use("/chat", chatRouter);
+router.use("/ai", aiRouter);
+router.use("/notifications", notificationRouter);
+router.use("/wallet", walletRouter);
+router.use("/disputes", disputeRouter);
+router.use("/uploads", uploadRouter);
+router.use("/webhooks", webhookRouter);
+
+export default router;
