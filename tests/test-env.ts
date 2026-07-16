@@ -13,5 +13,5 @@ process.env.CLOUDINARY_API_KEY = "test";
 process.env.CLOUDINARY_API_SECRET = "test";
 process.env.ZEPTOMAIL_SEND_MAIL_TOKEN = "test";
 process.env.MAIL_FROM_ADDRESS = "test@example.com";
-process.env.OPENAI_API_KEY = "test";
+process.env.GROQ_API_KEY = "test";
 process.env.LOG_LEVEL = "silent";

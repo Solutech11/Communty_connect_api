@@ -1,6 +1,7 @@
-import axios, { type AxiosInstance } from "axios";
+﻿import axios from "axios";
 import { env } from "../Config/env";
 import { AppError } from "./AppError";
+import { logger } from "./logger.utils";
 
 interface PaystackEnvelope<T> {
   status: boolean;
@@ -8,7 +9,7 @@ interface PaystackEnvelope<T> {
   data: T;
 }
 
-interface PaystackTransactionData {
+export interface PaystackTransactionData {
   authorization_url: string;
   access_code: string;
   reference: string;
@@ -38,7 +39,7 @@ interface PaystackTransferData {
   currency: string;
 }
 
-interface PaystackBank {
+export interface PaystackBank {
   name: string;
   code: string;
   currency: string;
@@ -46,130 +47,144 @@ interface PaystackBank {
   type: string;
 }
 
-class PaystackClient {
-  private readonly client: AxiosInstance;
+// Provider transport only: wallet credits, amount checks, idempotency, locks,
+// and MongoDB transactions remain in controllers where business state is known.
+const paystack = axios.create({
+  baseURL: env.PAYSTACK_BASE_URL,
+  timeout: 15_000,
+  headers: {
+    Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`,
+    "Content-Type": "application/json",
+  },
+});
 
-  public constructor() {
-    this.client = axios.create({
-      baseURL: env.PAYSTACK_BASE_URL,
-      timeout: 15_000,
-      headers: {
-        Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`,
-        "Content-Type": "application/json",
-      },
-    });
-  }
+// Centralize provider error handling without logging request payloads. Payloads
+// may contain account details, references, or other sensitive financial data.
+const runPaystackRequest = async <T>(
+  operation: string,
+  request: () => Promise<{ data: PaystackEnvelope<T> }>,
+): Promise<T> => {
+  try {
+    const response = await request();
 
-  private async request<T>(operation: () => Promise<{ data: PaystackEnvelope<T> }>): Promise<T> {
-    try {
-      const response = await operation();
-
-      if (!response.data.status) {
-        throw new AppError(502, "Payment provider rejected the request", "PAYSTACK_REJECTED");
-      }
-
-      return response.data.data;
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-
-      throw new AppError(502, "Payment provider is unavailable", "PAYSTACK_UNAVAILABLE");
+    if (!response.data.status) {
+      throw new AppError(502, "Payment provider rejected the request", "PAYSTACK_REJECTED");
     }
-  }
 
-  public async initializeTransaction(input: {
-    email: string;
-    amountKobo: number;
-    reference: string;
-    metadata: Record<string, unknown>;
-  }): Promise<PaystackTransactionData> {
-    return this.request(() =>
-      this.client.post("/transaction/initialize", {
-        email: input.email,
-        amount: input.amountKobo,
+    return response.data.data;
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    logger.warn(
+      {
+        operation,
+        provider: "paystack",
+        providerStatus: axios.isAxiosError(error) ? error.response?.status : undefined,
+      },
+      "Paystack request failed",
+    );
+    throw new AppError(502, "Payment provider is unavailable", "PAYSTACK_UNAVAILABLE");
+  }
+};
+
+export const initializePaystackTransaction = async (input: {
+  email: string;
+  amountKobo: number;
+  reference: string;
+  metadata: Record<string, unknown>;
+}): Promise<PaystackTransactionData> => {
+  return runPaystackRequest("initialize_transaction", () =>
+    paystack.post("/transaction/initialize", {
+      email: input.email,
+      // Paystack expects integer minor units; callers must never pass naira floats.
+      amount: input.amountKobo,
+      currency: env.PAYSTACK_CURRENCY,
+      reference: input.reference,
+      callback_url: env.PAYSTACK_CALLBACK_URL,
+      metadata: input.metadata,
+    }),
+  );
+};
+
+export const verifyPaystackTransaction = async (
+  reference: string,
+): Promise<PaystackTransactionData> => {
+  return runPaystackRequest("verify_transaction", () =>
+    // Encode references before placing client/provider-derived values in a URL.
+    paystack.get(`/transaction/verify/${encodeURIComponent(reference)}`),
+  );
+};
+
+export const listPaystackBanks = async (): Promise<PaystackBank[]> => {
+  return runPaystackRequest("list_banks", () =>
+    paystack.get("/bank", {
+      params: {
+        country: "nigeria",
         currency: env.PAYSTACK_CURRENCY,
-        reference: input.reference,
-        callback_url: env.PAYSTACK_CALLBACK_URL,
-        metadata: input.metadata,
-      }),
-    );
-  }
+        perPage: 100,
+      },
+    }),
+  );
+};
 
-  public async verifyTransaction(reference: string): Promise<PaystackTransactionData> {
-    return this.request(() =>
-      this.client.get(`/transaction/verify/${encodeURIComponent(reference)}`),
-    );
-  }
+export const resolvePaystackAccount = async (
+  accountNumber: string,
+  bankCode: string,
+): Promise<{ account_name: string; account_number: string }> => {
+  return runPaystackRequest("resolve_account", () =>
+    paystack.get("/bank/resolve", {
+      params: {
+        account_number: accountNumber,
+        bank_code: bankCode,
+      },
+    }),
+  );
+};
 
-  public async listBanks(): Promise<PaystackBank[]> {
-    return this.request(() =>
-      this.client.get("/bank", {
-        params: {
-          country: "nigeria",
-          currency: env.PAYSTACK_CURRENCY,
-          perPage: 100,
-        },
-      }),
-    );
-  }
+export const createPaystackTransferRecipient = async (input: {
+  name: string;
+  accountNumber: string;
+  bankCode: string;
+}): Promise<PaystackRecipientData> => {
+  return runPaystackRequest("create_transfer_recipient", () =>
+    paystack.post("/transferrecipient", {
+      type: "nuban",
+      name: input.name,
+      account_number: input.accountNumber,
+      bank_code: input.bankCode,
+      currency: env.PAYSTACK_CURRENCY,
+    }),
+  );
+};
 
-  public async resolveAccount(accountNumber: string, bankCode: string): Promise<{
-    account_name: string;
-    account_number: string;
-  }> {
-    return this.request(() =>
-      this.client.get("/bank/resolve", {
-        params: {
-          account_number: accountNumber,
-          bank_code: bankCode,
-        },
-      }),
-    );
-  }
+export const initiatePaystackTransfer = async (input: {
+  amountKobo: number;
+  recipientCode: string;
+  reference: string;
+  reason: string;
+}): Promise<PaystackTransferData> => {
+  return runPaystackRequest("initiate_transfer", () =>
+    paystack.post("/transfer", {
+      source: "balance",
+      amount: input.amountKobo,
+      recipient: input.recipientCode,
+      reference: input.reference,
+      reason: input.reason,
+      currency: env.PAYSTACK_CURRENCY,
+    }),
+  );
+};
 
-  public async createTransferRecipient(input: {
-    name: string;
-    accountNumber: string;
-    bankCode: string;
-  }): Promise<PaystackRecipientData> {
-    return this.request(() =>
-      this.client.post("/transferrecipient", {
-        type: "nuban",
-        name: input.name,
-        account_number: input.accountNumber,
-        bank_code: input.bankCode,
-        currency: env.PAYSTACK_CURRENCY,
-      }),
-    );
-  }
-
-  public async initiateTransfer(input: {
-    amountKobo: number;
-    recipientCode: string;
-    reference: string;
-    reason: string;
-  }): Promise<PaystackTransferData> {
-    return this.request(() =>
-      this.client.post("/transfer", {
-        source: "balance",
-        amount: input.amountKobo,
-        recipient: input.recipientCode,
-        reference: input.reference,
-        reason: input.reason,
-        currency: env.PAYSTACK_CURRENCY,
-      }),
-    );
-  }
-
-  public async finalizeTransfer(transferCode: string, otp: string): Promise<PaystackTransferData> {
-    return this.request(() =>
-      this.client.post("/transfer/finalize_transfer", {
-        transfer_code: transferCode,
-        otp,
-      }),
-    );
-  }
-}
-
-export const paystackClient = new PaystackClient();
+export const finalizePaystackTransfer = async (
+  transferCode: string,
+  otp: string,
+): Promise<PaystackTransferData> => {
+  return runPaystackRequest("finalize_transfer", () =>
+    paystack.post("/transfer/finalize_transfer", {
+      transfer_code: transferCode,
+      otp,
+    }),
+  );
+};

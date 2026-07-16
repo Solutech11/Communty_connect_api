@@ -7,6 +7,7 @@ import {
   createEvent,
   deleteDraftEvent,
   getEvent,
+  getRecommendedEvents,
   listAttendees,
   listCreatedEvents,
   listEvents,
@@ -56,17 +57,45 @@ const ticketBody = z.object({
   capacity: z.number().int().min(1).max(1_000_000).optional(),
 }).strict();
 const eventTicketParams = z.object({ id: objectIdSchema, ticketTypeId: objectIdSchema });
+// Coordinates are optional, but accepting only complete pairs prevents an
+// ambiguous distance calculation and accidental zero-value defaults.
+const locationQueryFields = {
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
+  radiusKm: z.coerce.number().positive().max(500).default(100),
+};
 
 router.get(
   "/",
+  optionalAuthenticate,
   validate({
     query: paginationSchema.extend({
       state: z.string().max(80).optional(),
       lga: z.string().max(100).optional(),
       activityType: z.string().max(60).optional(),
-    }),
+      latitude: z.coerce.number().min(-90).max(90).optional(),
+      longitude: z.coerce.number().min(-180).max(180).optional(),
+      radiusKm: z.coerce.number().positive().max(500).default(100),
+    }).refine(
+      (value) => (value.latitude === undefined) === (value.longitude === undefined),
+      { message: "Latitude and longitude must be supplied together" },
+    ),
   }),
   asyncHandler(listEvents),
+);
+router.get(
+  "/recommended",
+  authenticate,
+  validate({
+    query: z.object({
+      ...locationQueryFields,
+      limit: z.coerce.number().int().min(1).max(50).default(20),
+    }).refine(
+      (value) => (value.latitude === undefined) === (value.longitude === undefined),
+      { message: "Latitude and longitude must be supplied together" },
+    ),
+  }),
+  asyncHandler(getRecommendedEvents),
 );
 router.get("/created/me", authenticate, asyncHandler(listCreatedEvents));
 router.get("/:id", optionalAuthenticate, validate({ params: idParamsSchema }), asyncHandler(getEvent));

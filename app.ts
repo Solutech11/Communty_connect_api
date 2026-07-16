@@ -1,8 +1,11 @@
-import express from "express";
+﻿import express from "express";
 import pinoHttp from "pino-http";
 import swaggerUi from "swagger-ui-express";
 import { env } from "./Config/env";
 import { openApiDocument } from "./Config/swagger";
+import { startTicketReservationCron } from "./Cron/ticketReservation.cron";
+import { connectMongo, disconnectMongo } from "./DB/mongo";
+import { connectRedis, disconnectRedis } from "./DB/redis";
 import {
   aiRateLimiter,
   authRateLimiter,
@@ -14,6 +17,7 @@ import {
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 import { requestContext } from "./middleware/requestContext.middleware";
 import apiRouter from "./router";
+import Socket from "./Socket/Socket";
 import { logger } from "./utils/logger.utils";
 
 const app = express();
@@ -31,11 +35,12 @@ app.use(
   }),
 );
 app.use(securityMiddleware);
-
 app.use(
   express.json({
     limit: env.JSON_BODY_LIMIT,
     strict: true,
+    // Preserve the exact bytes Paystack signed. Parsing/re-serializing JSON
+    // would change the payload and make webhook verification unreliable.
     verify: (request, _response, buffer) => {
       (request as express.Request).rawBody = Buffer.from(buffer);
     },
@@ -72,5 +77,71 @@ app.use(`${env.API_PREFIX}/ai`, aiRateLimiter);
 app.use(env.API_PREFIX, apiRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
+
+export const startApp = async (): Promise<void> => {
+  // Fail startup before listening if required persistence or locking is unavailable.
+  await Promise.all([connectMongo(), connectRedis()]);
+
+  const server = app.listen(env.PORT, () => {
+    logger.info(
+      { environment: env.NODE_ENV, port: env.PORT },
+      "Community Connect API started",
+    );
+  });
+
+  server.on("error", (error) => {
+    logger.fatal({ error }, "HTTP server error");
+  });
+
+  const io = await Socket(server);
+  // REST message controllers reuse this authenticated namespace for socket emits.
+  app.set("io", io.of("/chat"));
+  const stopTicketReservationCron = startTicketReservationCron();
+  let shuttingDown = false;
+
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+      return;
+    }
+
+    shuttingDown = true;
+    logger.info({ signal }, "Graceful shutdown started");
+    // A hard deadline prevents deployments from hanging forever on a broken
+    // provider or network connection during shutdown.
+    const forceExitTimer = setTimeout(() => {
+      logger.fatal("Graceful shutdown timed out");
+      process.exit(1);
+    }, 15_000);
+    forceExitTimer.unref();
+    stopTicketReservationCron();
+
+    await new Promise<void>((resolve) => {
+      io.close(() => resolve());
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+    await Promise.allSettled([disconnectMongo(), disconnectRedis()]);
+    clearTimeout(forceExitTimer);
+    process.exit(0);
+  };
+
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+};
+
+if (require.main === module) {
+  startApp().catch((error) => {
+    logger.fatal({ error }, "Application bootstrap failed");
+    process.exit(1);
+  });
+}
 
 export default app;

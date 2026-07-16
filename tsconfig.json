@@ -1,4 +1,4 @@
-﻿{
+{
   "compilerOptions": {
     "target": "ES2022",
     "module": "Node16",
@@ -15,11 +15,13 @@
     "declaration": false,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "app.ts",
-    "server.ts",
+    "Community_AI/**/*.ts",
     "Config/**/*.ts",
     "Constant/**/*.ts",
     "Controller/**/*.ts",
@@ -36,6 +38,8 @@
     "utils/**/*.ts",
     "tests/**/*.ts"
   ],
-  "exclude": ["dist", "node_modules"]
+  "exclude": [
+    "dist",
+    "node_modules"
+  ]
 }
-

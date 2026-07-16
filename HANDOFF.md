@@ -15,7 +15,7 @@ yarn dev
 This now starts **nodemon**. The behavior is defined in `nodemon.json`:
 
 ```text
-nodemon -> tsx server.ts
+nodemon -> tsx app.ts
 ```
 
 There is no Vite or Vitest dependency. Tests use Node's built-in test runner.
@@ -32,7 +32,7 @@ yarn start
 The realtime bootstrap follows the same arrangement used in the supplied reference APIs:
 
 ```text
-server.ts
+app.ts
   -> const server = app.listen(...)
   -> Socket(server)
   -> Socket/Socket.ts
@@ -79,7 +79,7 @@ When Redis is available, Socket.IO uses the Redis adapter for multi-instance del
 - Paystack keys, callback URL, and webhook URL.
 - Cloudinary account values.
 - ZeptoMail send-mail token and verified sender.
-- OpenAI API key.
+- Groq API key.
 - Optional Expo enhanced push access token.
 
 Paystack webhook target:
@@ -123,7 +123,7 @@ Then run `yarn dev` with valid MongoDB, Redis, and `.env` configuration and conf
 ## Important Files
 
 - `app.ts`: Express middleware and route composition.
-- `server.ts`: database connection, `app.listen`, Socket.IO attachment, cron, and graceful shutdown.
+- `app.ts`: database connection, `app.listen`, Socket.IO attachment, cron, and graceful shutdown.
 - `Socket/Socket.ts`: Socket.IO server, CORS, JWT authentication, Redis adapter, and namespaces.
 - `Socket/routes/Chat.Socket.ts`: authenticated chat room and typing events.
 - `router/index.ts`: REST router composition.

@@ -9,6 +9,7 @@ const aiSessionSchema = new Schema(
       required: true,
     },
     previousResponseId: { type: String },
+    encryptedHistory: { type: String, select: false },
     title: { type: String, maxlength: 120 },
     lastUsedAt: { type: Date, default: Date.now },
   },

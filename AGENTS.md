@@ -6,7 +6,7 @@ This directory is the TypeScript, Express, MongoDB, Redis, Socket.IO, and third-
 
 This structure intentionally combines the strongest conventions observed in the owner's existing Savvy Bee, Propfizer, and ErrandPal APIs:
 
-- Keep `app.ts` as the Express composition root and `server.ts` as the process/network bootstrap.
+- Keep `app.ts` as the single Express composition and process/network bootstrap, matching the owner's preferred APIs.
 - Keep route trees in `router/`, Mongoose documents in `models/`, shared integrations in `utils/`, connection code in `DB/`, and domain orchestration in `Controller/`.
 - Use a small route aggregator per domain and a root route aggregator.
 - Keep route files thin: validation, authentication/authorization middleware, then controller functions.
@@ -19,11 +19,11 @@ Unlike the older CommonJS projects, all new code here must be strict TypeScript 
 
 ```text
 backend/
-  app.ts                  Express app composition only
-  server.ts               Mongo/Redis connect, HTTP/Socket start, graceful shutdown
+  app.ts                  Express composition, Mongo/Redis connect, HTTP/Socket start, graceful shutdown
+  Community_AI/           Groq client and event recommendation algorithms
   Config/                 Typed environment and Swagger configuration
   Constant/               Stable enums and constants
-  Controller/             Domain use cases and orchestration
+  Controller/             Functional domain use cases and orchestration
   Cron/                   Redis-locked reconciliation and maintenance jobs
   DB/                     MongoDB and Redis clients
   Socket/                 Authenticated Socket.IO gateway

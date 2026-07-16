@@ -1,10 +1,10 @@
-﻿import { CACHE_KEYS } from "../Constant";
+import { CACHE_KEYS } from "../Constant";
 import { TicketOrderModel } from "../models/Event/TicketOrder.model";
 import { TicketTypeModel } from "../models/Event/TicketType.model";
 import { TransactionModel } from "../models/Wallet/Transaction.model";
 import { completeTicketOrder } from "../Controller/ticket.controller";
 import { logger } from "../utils/logger.utils";
-import { paystackClient } from "../utils/paystack.utils";
+import { verifyPaystackTransaction } from "../utils/paystack.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
 
 const reconcileExpiredReservations = async (): Promise<void> => {
@@ -18,7 +18,7 @@ const reconcileExpiredReservations = async (): Promise<void> => {
   for (const order of orders) {
     try {
       const reference = order.paymentReference as string;
-      const provider = await paystackClient.verifyTransaction(reference);
+      const provider = await verifyPaystackTransaction(reference);
 
       if (provider.status === "success" && provider.amount === order.totalKobo) {
         await completeTicketOrder(reference, provider.amount);

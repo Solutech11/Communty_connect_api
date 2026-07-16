@@ -2,10 +2,11 @@
 import { AISessionModel } from "../models/AI/AISession.model";
 import { ConversationModel } from "../models/Chat/Conversation.model";
 import { MessageModel } from "../models/Chat/Message.model";
-import { EventModel } from "../models/Event/Event.model";
 import { AppError } from "../utils/AppError";
-import { createAIResponse, type AIPurpose } from "../utils/openai.utils";
+import { decryptField, encryptField } from "../utils/crypto.utils";
 import { sendSuccess } from "../utils/response.utils";
+import { getPersonalizedEventRecommendations } from "./EventRecommendation.algorithm";
+import { createAIResponse, type AIMessage, type AIPurpose } from "./Groq";
 
 const runAI = async (
   userId: string,
@@ -13,29 +14,60 @@ const runAI = async (
   prompt: string,
   sessionId?: string,
 ) => {
+  // userId and purpose are part of the lookup so one user cannot continue or
+  // inspect another user's AI session by guessing its MongoDB identifier.
   let session = sessionId
-    ? await AISessionModel.findOne({ _id: sessionId, userId, purpose })
+    ? await AISessionModel.findOne({ _id: sessionId, userId, purpose }).select("+encryptedHistory")
     : null;
 
   if (sessionId && !session) {
     throw new AppError(404, "AI session was not found", "AI_SESSION_NOT_FOUND");
   }
 
+  let history: AIMessage[] = [];
+
+  // Groq chat completions are stateless. Keep only six recent turns, encrypt
+  // them at rest, and validate the decrypted shape before sending them back.
+  if (session?.encryptedHistory) {
+    const parsed = JSON.parse(decryptField(session.encryptedHistory)) as unknown;
+    if (Array.isArray(parsed)) {
+      history = parsed.filter((message): message is AIMessage => {
+        return Boolean(
+          message &&
+          typeof message === "object" &&
+          "role" in message &&
+          (message.role === "user" || message.role === "assistant") &&
+          "content" in message &&
+          typeof message.content === "string",
+        );
+      }).slice(-12);
+    }
+  }
+
   const result = await createAIResponse({
     purpose,
     prompt,
-    previousResponseId: session?.previousResponseId || undefined,
+    history,
   });
+  // The encrypted field is select:false in the model and is never returned by
+  // session-list endpoints.
+  const encryptedHistory = encryptField(JSON.stringify([
+    ...history,
+    { role: "user", content: prompt },
+    { role: "assistant", content: result.text },
+  ].slice(-12)));
 
   if (!session) {
     session = await AISessionModel.create({
       userId,
       purpose,
       previousResponseId: result.responseId,
+      encryptedHistory,
       lastUsedAt: new Date(),
     });
   } else {
     session.previousResponseId = result.responseId;
+    session.encryptedHistory = encryptedHistory;
     session.lastUsedAt = new Date();
     await session.save();
   }
@@ -67,16 +99,28 @@ export const generateEventCopy = async (request: Request, response: Response): P
 };
 
 export const recommendEvents = async (request: Request, response: Response): Promise<Response> => {
-  const events = await EventModel.find({ status: "published", startsAt: { $gte: new Date() } })
-    .select("title description activityType state lga startsAt setting tags")
-    .limit(30)
-    .lean();
-  const prompt = `User preferences: ${JSON.stringify(request.body.preferences)}\nCandidate events: ${JSON.stringify(events)}\nReturn up to 5 event IDs and short reasons.`;
-  const result = await runAI(request.auth?.id as string, "recommendations", prompt);
-  return sendSuccess(response, 200, "Event recommendations generated", {
-    ...result,
-    candidateEvents: events,
+  // Convert flexible client preference values into plain text signals. The
+  // ranking model ignores objects and other untrusted structures.
+  const rawPreferences = request.body.preferences || {};
+  const extraPreferences = Object.values(rawPreferences).flatMap((value) => {
+    if (typeof value === "string") {
+      return [value];
+    }
+
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : [];
   });
+  const result = await getPersonalizedEventRecommendations({
+    userId: request.auth?.id as string,
+    latitude: request.body.latitude,
+    longitude: request.body.longitude,
+    radiusKm: request.body.radiusKm,
+    limit: request.body.limit,
+    extraPreferences,
+  });
+
+  return sendSuccess(response, 200, "Personalized event recommendations generated", result);
 };
 
 export const summarizeConversation = async (
@@ -116,5 +160,4 @@ export const deleteAISession = async (request: Request, response: Response): Pro
 
   return sendSuccess(response, 200, "AI session deleted");
 };
-
 

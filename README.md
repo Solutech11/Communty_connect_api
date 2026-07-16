@@ -9,7 +9,7 @@ Production-oriented Node.js/TypeScript backend for the Community Connect Expo ap
 - JWT access tokens and rotating hashed refresh tokens
 - bcrypt password hashing and AES-256-GCM sensitive-field encryption
 - Paystack payments, transfers, payout webhooks, and account resolution
-- OpenAI Responses API for the in-app assistant and AI features
+- Groq API for low-cost assistant, event-copy, and chat-summary features
 - Socket.IO with a Redis adapter for realtime chat/presence
 - Expo Push Service, Cloudinary, and ZeptoMail
 - Zod, Helmet, CORS allowlists, HPP, rate limiting, slowdown, body limits, and Pino redaction
@@ -39,7 +39,7 @@ Required local services:
 ## Commands
 
 ```bash
-yarn dev          # nodemon development server (executes tsx server.ts)
+yarn dev          # nodemon development server (executes tsx app.ts)
 yarn typecheck    # strict TypeScript validation
 yarn test         # unit tests
 yarn docs:check   # route count and endpoint registry drift check
@@ -91,7 +91,8 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
-| GET | `/events` | No | Search/filter upcoming published events |
+| GET | `/events` | Optional | Search/filter events; nearest first when location is supplied or saved |
+| GET | `/events/recommended` | Yes | Personalized nearby ranking from interests and ticket history |
 | GET | `/events/created/me` | Yes | List my created events |
 | GET | `/events/{id}` | Conditional | Get event and active ticket types; draft is owner-only |
 | POST | `/events` | Yes | Create event draft |
@@ -138,7 +139,7 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | POST | `/chat/conversations/{id}/read` | Yes | Record and emit read receipt |
 | POST | `/ai/chat` | Yes | Community Connect AI assistant |
 | POST | `/ai/event-copy` | Yes | Generate grounded event copy |
-| POST | `/ai/event-recommendations` | Yes | Rank server-supplied current events |
+| POST | `/ai/event-recommendations` | Yes | Run the local recommendation model with optional preferences/location |
 | POST | `/ai/conversations/{id}/summary` | Yes | Summarize participant-owned conversation |
 | GET | `/ai/sessions` | Yes | List my AI conversation states |
 | DELETE | `/ai/sessions/{id}` | Yes | Delete my AI session |
@@ -202,6 +203,14 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 5. Withdrawals use stored Paystack recipient codes, unique references, reserved wallet funds, and final `transfer.success`, `transfer.failed`, or `transfer.reversed` webhooks.
 6. If Paystack transfer confirmation is enabled, call the finalize route with the user's OTP. Never log the OTP.
 
+## Event Recommendation Algorithm
+
+- Save a user location with `PATCH /users/me` using GeoJSON coordinates in `[longitude, latitude]` order.
+- `GET /events` sorts by MongoDB geospatial distance whenever coordinates are provided or the authenticated user has a saved location.
+- `GET /events/recommended` combines distance, profile interests, paid ticket history, local area, popularity, and start-date freshness.
+- Distance has the highest weight, so personalization cannot bury genuinely nearby events. The response includes score, distance, and human-readable reasons.
+- This ranking runs locally in TypeScript/MongoDB and does not call Groq.
+
 ## Security Notes
 
 - Access tokens are short-lived. Refresh JWTs are hashed in MongoDB, rotated on every use, and tracked by family for replay response.
@@ -216,7 +225,7 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 
 ## External Provider Notes
 
-- OpenAI uses the Responses API and stores only the provider response ID needed for conversation continuity, not a duplicate raw transcript.
+- Groq powers generative AI through `openai/gpt-oss-20b` by default. Short AI session context is encrypted at rest; nearby-event ranking remains local and does not spend model tokens.
 - Expo sends in batches of at most 100, accepts optional enhanced-security access tokens, and records ticket IDs. A production worker should fetch push receipts about 15 minutes later and remove `DeviceNotRegistered` tokens.
 - ZeptoMail payloads are sent server-to-server using the configured send-mail token.
 - Cloudinary receives only authenticated, MIME-checked, size-limited in-memory image uploads.
@@ -224,16 +233,9 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 
 ## Development Runtime
 
-`yarn dev` runs **nodemon**, configured by `nodemon.json`. Nodemon watches the TypeScript application folders and executes `tsx server.ts` after changes. Vite and Vitest are not part of this backend. Tests use Node.js's built-in `node:test` runner through `tsx`.
+`yarn dev` runs **nodemon**, configured by `nodemon.json`. Nodemon watches the TypeScript application folders and executes `tsx app.ts` after changes. Vite and Vitest are not part of this backend. Tests use Node.js's built-in `node:test` runner through `tsx`.
 
-The bootstrap deliberately matches the owner's other APIs:
-
-```ts
-const server = app.listen(env.PORT, onListening);
-const io = await Socket(server);
-```
-
-Socket initialization lives in `Socket/Socket.ts`, while chat connection events live in `Socket/routes/Chat.Socket.ts`.
+The application follows the owner's single-entry style: `app.ts` composes Express, connects MongoDB and Redis, starts `app.listen`, attaches Socket.IO, starts cron jobs, and handles graceful shutdown. Socket connection events remain in `Socket/routes/Chat.Socket.ts`.
 
 ## Moving This Backend
 
@@ -254,6 +256,6 @@ Production deployment should run `yarn build` followed by `yarn start`, with Mon
 See [`AGENTS.md`](./AGENTS.md) for the durable architecture and security rules. The important flow is:
 
 ```text
-app.ts -> router/<domain> -> middleware -> Controller/<domain> -> models/<domain>
-                                      \-> utils/<provider or reusable behavior>
+app.ts -> router/<domain> -> middleware -> functional controller -> models/<domain>
+                                      \-> Community_AI or utils/<provider behavior>
 ```

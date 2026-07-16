@@ -1,4 +1,4 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { z } from "zod";
 import {
   assistantChat,
@@ -7,7 +7,7 @@ import {
   listAISessions,
   recommendEvents,
   summarizeConversation,
-} from "../../Controller/ai.controller";
+} from "../../Community_AI/AI.controller";
 import { authenticate } from "../../middleware/auth.middleware";
 import { validate } from "../../middleware/validate.middleware";
 import { idParamsSchema, objectIdSchema } from "../../schemas/common.schemas";
@@ -40,7 +40,18 @@ router.post(
 );
 router.post(
   "/event-recommendations",
-  validate({ body: z.object({ preferences: z.record(z.string(), z.unknown()) }).strict() }),
+  validate({
+    body: z.object({
+      preferences: z.record(z.string(), z.unknown()).default({}),
+      latitude: z.number().min(-90).max(90).optional(),
+      longitude: z.number().min(-180).max(180).optional(),
+      radiusKm: z.number().positive().max(500).default(100),
+      limit: z.number().int().min(1).max(50).default(20),
+    }).strict().refine(
+      (value) => (value.latitude === undefined) === (value.longitude === undefined),
+      { message: "Latitude and longitude must be supplied together" },
+    ),
+  }),
   asyncHandler(recommendEvents),
 );
 router.post(

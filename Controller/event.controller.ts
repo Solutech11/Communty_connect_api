@@ -1,5 +1,7 @@
 ﻿import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
+import { getPersonalizedEventRecommendations } from "../Community_AI/EventRecommendation.algorithm";
+import { UserModel } from "../models/Auth/User.model";
 import { EventModel } from "../models/Event/Event.model";
 import { TicketOrderModel } from "../models/Event/TicketOrder.model";
 import { TicketTypeModel } from "../models/Event/TicketType.model";
@@ -18,12 +20,12 @@ const createSlug = (title: string): string => {
 };
 
 export const listEvents = async (request: Request, response: Response): Promise<Response> => {
-  const { page, limit, search, state, lga, activityType } = request.query as Record<string, string>;
+  const { search, state, lga, activityType } = request.query as Record<string, string>;
+  const page = Number(request.query.page || 1);
+  const limit = Number(request.query.limit || 20);
+  const radiusKm = Number(request.query.radiusKm || 100);
   const query: Record<string, unknown> = { status: "published", startsAt: { $gte: new Date() } };
 
-  if (search) {
-    query.$text = { $search: search };
-  }
   if (state) {
     query.state = state;
   }
@@ -34,21 +36,111 @@ export const listEvents = async (request: Request, response: Response): Promise<
     query.activityType = activityType;
   }
 
-  const numericPage = Number(page || 1);
-  const numericLimit = Number(limit || 20);
+  const requestedLatitude = request.query.latitude === undefined
+    ? undefined
+    : Number(request.query.latitude);
+  const requestedLongitude = request.query.longitude === undefined
+    ? undefined
+    : Number(request.query.longitude);
+  // GeoJSON order is longitude first. Request coordinates take precedence over
+  // the authenticated user's saved profile location.
+  let userCoordinates = requestedLatitude !== undefined && requestedLongitude !== undefined
+    ? [requestedLongitude, requestedLatitude] as [number, number]
+    : undefined;
+
+  if (!userCoordinates && request.auth?.id) {
+    const user = await UserModel.findById(request.auth.id).select("location").lean();
+    if (user?.location?.coordinates?.length === 2) {
+      userCoordinates = [
+        user.location.coordinates[0] as number,
+        user.location.coordinates[1] as number,
+      ];
+    }
+  }
+
+  if (userCoordinates) {
+    if (search) {
+      // Escape regex metacharacters so search text is treated as data, not a pattern.
+      const escapedSearch = search.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp(escapedSearch, "i");
+      query.$or = [{ title: pattern }, { description: pattern }, { tags: pattern }];
+    }
+
+    // $geoNear must remain the first aggregation stage to use the 2dsphere index.
+    const [result] = await EventModel.aggregate<{
+      events: Array<Record<string, unknown> & { distanceMeters: number }>;
+      total: Array<{ count: number }>;
+    }>([
+      {
+        $geoNear: {
+          near: { type: "Point", coordinates: userCoordinates },
+          distanceField: "distanceMeters",
+          maxDistance: radiusKm * 1000,
+          spherical: true,
+          query,
+        },
+      },
+      {
+        $facet: {
+          events: [
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+          ],
+          total: [{ $count: "count" }],
+        },
+      },
+    ]);
+    const nearbyEvents = (result?.events || []).map((event) => ({
+      ...event,
+      distanceKm: Number((event.distanceMeters / 1000).toFixed(2)),
+    }));
+    const events = await EventModel.populate(nearbyEvents, {
+      path: "creatorId",
+      select: "firstName lastName avatarUrl",
+    });
+
+    return sendSuccess(response, 200, "Nearby events retrieved", {
+      events,
+      sort: "nearest",
+      locationUsed: { latitude: userCoordinates[1], longitude: userCoordinates[0] },
+      pagination: { page, limit, total: result?.total[0]?.count || 0 },
+    });
+  }
+
+  if (search) {
+    // Without coordinates, the normal text index is faster than a regex scan.
+    query.$text = { $search: search };
+  }
+
   const [events, total] = await Promise.all([
     EventModel.find(query)
       .populate("creatorId", "firstName lastName avatarUrl")
       .sort({ startsAt: 1 })
-      .skip((numericPage - 1) * numericLimit)
-      .limit(numericLimit),
+      .skip((page - 1) * limit)
+      .limit(limit),
     EventModel.countDocuments(query),
   ]);
 
   return sendSuccess(response, 200, "Events retrieved", {
     events,
-    pagination: { page: numericPage, limit: numericLimit, total },
+    sort: "soonest",
+    pagination: { page, limit, total },
   });
+};
+
+export const getRecommendedEvents = async (
+  request: Request,
+  response: Response,
+): Promise<Response> => {
+  const recommendations = await getPersonalizedEventRecommendations({
+    userId: request.auth?.id as string,
+    latitude: request.query.latitude === undefined ? undefined : Number(request.query.latitude),
+    longitude: request.query.longitude === undefined ? undefined : Number(request.query.longitude),
+    radiusKm: Number(request.query.radiusKm || 100),
+    limit: Number(request.query.limit || 20),
+  });
+
+  return sendSuccess(response, 200, "Personalized nearby events retrieved", recommendations);
 };
 
 export const getEvent = async (request: Request, response: Response): Promise<Response> => {

@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { env } from "../Config/env";
@@ -15,7 +15,10 @@ import {
   sha256,
 } from "../utils/crypto.utils";
 import { createNotification } from "../utils/notificationService.utils";
-import { paystackClient } from "../utils/paystack.utils";
+import {
+  initializePaystackTransaction,
+  verifyPaystackTransaction,
+} from "../utils/paystack.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const orderNumber = (): string => `CC-${Date.now()}-${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -138,7 +141,7 @@ export const createTicketOrder = async (
       return sendSuccess(response, 201, "Free ticket issued", { order: paidOrder, qrToken });
     }
 
-    const checkout = await paystackClient.initializeTransaction({
+    const checkout = await initializePaystackTransaction({
       email: request.auth?.email as string,
       amountKobo: totalKobo,
       reference,
@@ -244,7 +247,7 @@ export const verifyTicketOrder = async (
   }
 
   if (order.status !== "paid") {
-    const provider = await paystackClient.verifyTransaction(order.paymentReference as string);
+    const provider = await verifyPaystackTransaction(order.paymentReference as string);
 
     if (provider.status !== "success" || provider.amount !== order.totalKobo) {
       throw new AppError(409, "Ticket payment is not confirmed", "PAYMENT_NOT_CONFIRMED");

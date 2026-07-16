@@ -37,9 +37,10 @@ const envSchema = z.object({
   ZEPTOMAIL_SEND_MAIL_TOKEN: z.string().min(1),
   MAIL_FROM_ADDRESS: z.string().email(),
   MAIL_FROM_NAME: z.string().min(1).default("Community Connect"),
-  OPENAI_API_KEY: z.string().min(1),
-  OPENAI_MODEL: z.string().min(1).default("gpt-5-mini"),
-  OPENAI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(100).max(4000).default(800),
+  GROQ_API_KEY: z.string().min(1),
+  GROQ_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
+  GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-20b"),
+  GROQ_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(100).max(4000).default(800),
   EXPO_ACCESS_TOKEN: z.string().optional().default(""),
   MAX_IMAGE_SIZE_BYTES: z.coerce.number().int().positive().default(5242880),
   JSON_BODY_LIMIT: z.string().default("100kb"),
@@ -64,7 +65,7 @@ if (parsed.data.NODE_ENV === "production") {
     parsed.data.PAYSTACK_SECRET_KEY,
     parsed.data.CLOUDINARY_API_SECRET,
     parsed.data.ZEPTOMAIL_SEND_MAIL_TOKEN,
-    parsed.data.OPENAI_API_KEY,
+    parsed.data.GROQ_API_KEY,
   ].some((value) => /replace|placeholder|change-me/i.test(value));
 
   if (unsafePlaceholders || /^0{64}$/.test(parsed.data.FIELD_ENCRYPTION_KEY)) {

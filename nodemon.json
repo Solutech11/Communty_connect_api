@@ -1,7 +1,7 @@
-{
+﻿{
   "watch": [
     "app.ts",
-    "server.ts",
+    "Community_AI",
     "Config",
     "Controller",
     "Cron",
@@ -20,7 +20,7 @@
     "node_modules",
     "tests"
   ],
-  "exec": "tsx server.ts",
+  "exec": "tsx app.ts",
   "signal": "SIGTERM",
   "delay": "500"
 }

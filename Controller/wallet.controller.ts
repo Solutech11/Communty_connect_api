@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { CACHE_KEYS } from "../Constant";
@@ -10,7 +10,15 @@ import { TransactionModel } from "../models/Wallet/Transaction.model";
 import { WalletModel } from "../models/Wallet/Wallet.model";
 import { AppError } from "../utils/AppError";
 import { encryptField, maskAccountNumber, sha256 } from "../utils/crypto.utils";
-import { paystackClient } from "../utils/paystack.utils";
+import {
+  createPaystackTransferRecipient,
+  finalizePaystackTransfer,
+  initializePaystackTransaction,
+  initiatePaystackTransfer,
+  listPaystackBanks,
+  resolvePaystackAccount,
+  verifyPaystackTransaction,
+} from "../utils/paystack.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
 import { sendSuccess } from "../utils/response.utils";
 
@@ -106,7 +114,7 @@ export const initializeTopup = async (request: Request, response: Response): Pro
   });
 
   try {
-    const provider = await paystackClient.initializeTransaction({
+    const provider = await initializePaystackTransaction({
       email: request.auth?.email as string,
       amountKobo,
       reference,
@@ -142,7 +150,7 @@ export const verifyTopup = async (request: Request, response: Response): Promise
     throw new AppError(404, "Top-up transaction was not found", "TRANSACTION_NOT_FOUND");
   }
 
-  const provider = await paystackClient.verifyTransaction((request.params.reference as string));
+  const provider = await verifyPaystackTransaction((request.params.reference as string));
 
   if (provider.status !== "success" || provider.amount !== transaction.amountKobo) {
     throw new AppError(409, "Payment is not confirmed", "PAYMENT_NOT_CONFIRMED");
@@ -198,7 +206,7 @@ export const listBanks = async (_request: Request, response: Response): Promise<
     }
   }
 
-  const banks = (await paystackClient.listBanks()).filter((bank) => bank.active);
+  const banks = (await listPaystackBanks()).filter((bank) => bank.active);
 
   if (redisClient.isReady) {
     await redisClient.set(CACHE_KEYS.banks, JSON.stringify(banks), { EX: 24 * 60 * 60 });
@@ -221,8 +229,8 @@ export const addBankAccount = async (request: Request, response: Response): Prom
   }
 
   const [resolved, banks] = await Promise.all([
-    paystackClient.resolveAccount(accountNumber, bankCode),
-    paystackClient.listBanks(),
+    resolvePaystackAccount(accountNumber, bankCode),
+    listPaystackBanks(),
   ]);
   const bank = banks.find((item) => item.code === bankCode);
 
@@ -230,7 +238,7 @@ export const addBankAccount = async (request: Request, response: Response): Prom
     throw new AppError(422, "Bank code is invalid", "INVALID_BANK_CODE");
   }
 
-  const recipient = await paystackClient.createTransferRecipient({
+  const recipient = await createPaystackTransferRecipient({
     name: resolved.account_name,
     accountNumber,
     bankCode,
@@ -436,7 +444,7 @@ export const withdraw = async (request: Request, response: Response): Promise<Re
     const transaction = await TransactionModel.findById(transactionId);
 
     try {
-      const provider = await paystackClient.initiateTransfer({
+      const provider = await initiatePaystackTransfer({
         amountKobo,
         recipientCode: bankAccount.paystackRecipientCode as string,
         reference,
@@ -472,7 +480,7 @@ export const finalizeWithdrawal = async (request: Request, response: Response): 
     throw new AppError(409, "Withdrawal is not awaiting OTP", "WITHDRAWAL_NOT_AWAITING_OTP");
   }
 
-  await paystackClient.finalizeTransfer(metadata.transferCode, request.body.otp);
+  await finalizePaystackTransfer(metadata.transferCode, request.body.otp);
   return sendSuccess(response, 202, "Withdrawal OTP accepted", { transaction });
 };
 
@@ -541,5 +549,3 @@ export const refundWithdrawal = async (reference: string, reason: string): Promi
     await session.endSession();
   }
 };
-
-

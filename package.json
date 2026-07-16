@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "description": "Secure API and realtime backend for Community Connect.",
-  "main": "dist/server.js",
+  "main": "dist/app.js",
   "scripts": {
     "dev": "nodemon",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node dist/app.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/crypto.test.ts tests/docs.test.ts",
-    "test:watch": "tsx --test --watch tests/crypto.test.ts tests/docs.test.ts",
+    "test": "tsx scripts/run-tests.ts",
+    "test:watch": "tsx --test --watch tests/crypto.test.ts",
     "docs:check": "tsx scripts/check-route-docs.ts"
   },
   "engines": {
@@ -33,7 +33,6 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.4",
     "multer": "^2.2.0",
-    "openai": "^6.47.0",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "rate-limit-redis": "^5.0.0",

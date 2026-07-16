@@ -1,4 +1,4 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { z } from "zod";
 import {
   changePassword,
@@ -15,6 +15,14 @@ import { asyncHandler } from "../../utils/asyncHandler.utils";
 
 const router = Router();
 const pushToken = z.string().regex(/^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$/);
+// Mobile clients must send GeoJSON order: [longitude, latitude].
+const geoPoint = z.object({
+  type: z.literal("Point").default("Point"),
+  coordinates: z.tuple([
+    z.number().min(-180).max(180),
+    z.number().min(-90).max(90),
+  ]),
+}).strict();
 
 router.use(authenticate);
 router.get("/me", asyncHandler(getProfile));
@@ -30,6 +38,7 @@ router.patch(
       country: z.string().trim().max(80).optional(),
       state: z.string().trim().max(80).optional(),
       lga: z.string().trim().max(100).optional(),
+      location: geoPoint.optional(),
       interests: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
     }).strict().refine((value) => Object.keys(value).length > 0),
   }),

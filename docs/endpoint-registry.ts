@@ -29,7 +29,8 @@ export const apiEndpoints: EndpointDefinition[] = [
   { method: "delete", path: "/users/me/push-tokens", tag: "Users", summary: "Remove Expo push token", description: "Removes a device push token from the signed-in account.", auth: true, requestBody: true },
   { method: "delete", path: "/users/me", tag: "Users", summary: "Delete my account", description: "Requires password confirmation, anonymizes the account, and revokes sessions.", auth: true, requestBody: true },
 
-  { method: "get", path: "/events", tag: "Events", summary: "List published events", description: "Returns searchable upcoming published events with location filters.", auth: false },
+  { method: "get", path: "/events", tag: "Events", summary: "List events", description: "Lists upcoming published events and sorts nearest-first when coordinates or a saved user location are available.", auth: false },
+  { method: "get", path: "/events/recommended", tag: "Events", summary: "Get personalized nearby events", description: "Uses geospatial distance, profile interests, paid-event history, popularity, and freshness to rank upcoming events.", auth: true },
   { method: "get", path: "/events/created/me", tag: "Events", summary: "List my created events", description: "Returns every event created by the signed-in user.", auth: true },
   { method: "get", path: "/events/{id}", tag: "Events", summary: "Get event", description: "Returns an event and active ticket types; drafts are owner-only.", auth: false },
   { method: "post", path: "/events", tag: "Events", summary: "Create event draft", description: "Creates a validated event in draft state.", auth: true, requestBody: true },
@@ -67,7 +68,7 @@ export const apiEndpoints: EndpointDefinition[] = [
 
   { method: "post", path: "/ai/chat", tag: "AI", summary: "Chat with Community Connect AI", description: "Uses the OpenAI Responses API with a server-owned safety and product prompt.", auth: true, requestBody: true },
   { method: "post", path: "/ai/event-copy", tag: "AI", summary: "Generate event copy", description: "Generates event copy using supplied facts without inventing venue or pricing details.", auth: true, requestBody: true },
-  { method: "post", path: "/ai/event-recommendations", tag: "AI", summary: "Recommend events", description: "Ranks only current event records supplied by the server.", auth: true, requestBody: true },
+  { method: "post", path: "/ai/event-recommendations", tag: "AI", summary: "Recommend events", description: "Runs the local nearby-event ranking model without spending Groq tokens.", auth: true, requestBody: true },
   { method: "post", path: "/ai/conversations/{id}/summary", tag: "AI", summary: "Summarize conversation", description: "Summarizes up to 100 messages only after participant authorization.", auth: true },
   { method: "get", path: "/ai/sessions", tag: "AI", summary: "List AI sessions", description: "Lists AI conversation state owned by the signed-in user.", auth: true },
   { method: "delete", path: "/ai/sessions/{id}", tag: "AI", summary: "Delete AI session", description: "Deletes an AI session owned by the signed-in user.", auth: true },
