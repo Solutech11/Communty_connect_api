@@ -1,4 +1,4 @@
-﻿import type { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { WebhookEventModel } from "../models/Webhook/WebhookEvent.model";
 import { AppError } from "../utils/AppError";
@@ -13,6 +13,7 @@ import {
   refundWithdrawal,
 } from "./wallet.controller";
 import { completeTicketOrder } from "./ticket.controller";
+import { completeCommunityMembershipOrder } from "./communityPayment.controller";
 
 const paystackWebhookSchema = z.object({
   event: z.string().min(1).max(100),
@@ -87,8 +88,14 @@ export const paystackWebhook = async (request: Request, response: Response): Pro
 
   try {
     if (payload.event === "charge.success" && reference) {
+      if (payload.data.amount === undefined) {
+        throw new AppError(400, "Webhook payment amount is required", "WEBHOOK_AMOUNT_REQUIRED");
+      }
+
       if (reference.startsWith("ticket_")) {
         await completeTicketOrder(reference, payload.data.amount);
+      } else if (reference.startsWith("community_")) {
+        await completeCommunityMembershipOrder(reference, payload.data.amount);
       } else {
         await creditVerifiedTopup(reference, payload.data.amount);
       }

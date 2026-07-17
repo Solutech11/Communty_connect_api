@@ -149,7 +149,10 @@ export const getEvent = async (request: Request, response: Response): Promise<Re
     "firstName lastName avatarUrl bio",
   );
 
-  if (!event || (event.status === "draft" && event.creatorId._id.toString() !== request.auth?.id)) {
+  const isOwner = event?.creatorId._id.toString() === request.auth?.id;
+  const isAdmin = request.auth?.role === "admin";
+
+  if (!event || (event.status !== "published" && !isOwner && !isAdmin)) {
     throw new AppError(404, "Event was not found", "EVENT_NOT_FOUND");
   }
 
@@ -207,10 +210,14 @@ export const publishEvent = async (request: Request, response: Response): Promis
     throw new AppError(422, "Event dates are invalid for publishing", "INVALID_EVENT_DATES");
   }
 
-  event.status = "published";
-  event.publishedAt = new Date();
+  if (event.status !== "draft" && event.status !== "rejected") {
+    throw new AppError(409, "Only a draft can be submitted for approval", "EVENT_NOT_SUBMITTABLE");
+  }
+
+  event.status = "pending_approval";
+  event.submittedAt = new Date();
   await event.save();
-  return sendSuccess(response, 200, "Event published", { event });
+  return sendSuccess(response, 200, "Event submitted for admin approval", { event });
 };
 
 export const cancelEvent = async (request: Request, response: Response): Promise<Response> => {

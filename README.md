@@ -14,6 +14,7 @@ Production-oriented Node.js/TypeScript backend for the Community Connect Expo ap
 - Expo Push Service, Cloudinary, and ZeptoMail
 - Zod, Helmet, CORS allowlists, HPP, rate limiting, slowdown, body limits, and Pino redaction
 - Swagger/OpenAPI 3.1 at `/api/docs`
+- Secured EJS operations portal at `/admin`
 
 ## Quick Start (Yarn)
 
@@ -98,7 +99,7 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | POST | `/events` | Yes | Create event draft |
 | PATCH | `/events/{id}` | Yes | Update owned draft |
 | POST | `/events/{id}/orders` | Yes + key | Reserve inventory and initialize paid/free ticket checkout |
-| POST | `/events/{id}/publish` | Yes | Validate and publish owned event |
+| POST | `/events/{id}/publish` | Yes | Validate and submit owned event for admin approval |
 | POST | `/events/{id}/cancel` | Yes | Cancel owned event |
 | DELETE | `/events/{id}` | Yes | Delete owned draft |
 | POST | `/events/{id}/ticket-types` | Yes | Add ticket type (maximum 10) |
@@ -118,7 +119,9 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | GET | `/communities/{id}` | No | Get community details |
 | POST | `/communities` | Yes | Create and join owned community |
 | PATCH | `/communities/{id}` | Yes | Update owned community |
-| POST | `/communities/{id}/members` | Yes | Join public community |
+| POST | `/communities/{id}/members` | Yes | Join a free public community |
+| POST | `/communities/{id}/membership-orders` | Yes + key | Initialize premium membership checkout and platform charge |
+| GET | `/communities/membership-orders/{orderNumber}/verify` | Yes | Verify payment and activate premium membership |
 | DELETE | `/communities/{id}/members/me` | Yes | Leave community (not owner) |
 | GET | `/communities/{id}/members` | Yes | List safe member profiles |
 | GET | `/friends` | Yes | List accepted friendships |
@@ -164,14 +167,14 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | GET | `/wallet` | Yes | Get wallet balances in kobo |
 | GET | `/wallet/transactions` | Yes | Filter owned ledger entries |
 | GET | `/wallet/transactions/{id}` | Yes | Get one owned transaction |
-| POST | `/wallet/topups` | Yes + key | Create ledger entry and initialize Paystack |
+| POST | `/wallet/topups` | Yes + key | Initialize requested wallet credit plus deposit charge |
 | GET | `/wallet/topups/{reference}/verify` | Yes | Verify amount/status and credit once |
 | GET | `/wallet/banks` | Yes | Cached active Paystack bank list |
 | GET | `/wallet/bank-accounts` | Yes | List masked owned accounts |
 | POST | `/wallet/bank-accounts` | Yes | Resolve, create recipient, encrypt and save account |
 | DELETE | `/wallet/bank-accounts/{id}` | Yes | Deactivate owned account |
 | POST | `/wallet/transfers` | Yes + key | Atomic internal debit/credit transfer |
-| POST | `/wallet/withdrawals` | Yes + key | Reserve funds and initiate referenced payout |
+| POST | `/wallet/withdrawals` | Yes + key | Reserve funds, deduct withdrawal charge, and initiate net payout |
 | POST | `/wallet/withdrawals/{reference}/finalize` | Yes | Submit Paystack transfer OTP when required |
 
 ### Uploads and Webhooks
@@ -193,6 +196,15 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 | `message:new` | Server -> room | Emitted after REST message persistence |
 | `conversation:read` | Server -> room | Emitted after REST read persistence |
 | `typing:start` / `typing:stop` | Bidirectional | Ephemeral typing state; messages still use REST |
+
+## Admin Portal and Platform Charges
+
+- Visit `/admin/login` and sign in with an active user whose role is `admin`. The `BOOTSTRAP_ADMIN_EMAIL` registration flow remains the only public bootstrap path.
+- Admin browser sessions are hashed in MongoDB, expire automatically, bind to IP and user agent, use secure HttpOnly SameSite cookies, and require CSRF tokens for every action.
+- Events submitted through `POST /events/{id}/publish` remain `pending_approval` until approved in the portal. Published events can be deactivated with a recorded reason.
+- Platform percentages are configured as integer basis points: `DEPOSIT_CHARGE_BPS`, `WITHDRAWAL_CHARGE_BPS`, `TICKET_CHARGE_BPS`, and `COMMUNITY_CHARGE_BPS`.
+- Deposit fees are added to the desired wallet credit; withdrawal fees are deducted from the requested payout; ticket fees are added as a service fee; premium-community fees are retained from owner proceeds.
+- Earnings are recognized only inside the same Mongo transaction that completes the verified payment or successful withdrawal. The immutable source reference prevents duplicate earnings.
 
 ## Paystack Production Checklist
 

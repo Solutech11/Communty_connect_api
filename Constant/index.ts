@@ -1,8 +1,24 @@
 export const USER_ROLES = ["member", "moderator", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
-export const EVENT_STATUSES = ["draft", "published", "cancelled", "completed"] as const;
+export const EVENT_STATUSES = [
+  "draft",
+  "pending_approval",
+  "published",
+  "rejected",
+  "deactivated",
+  "cancelled",
+  "completed",
+] as const;
 export type EventStatus = (typeof EVENT_STATUSES)[number];
+
+export const PLATFORM_CHARGE_TYPES = [
+  "deposit",
+  "withdrawal",
+  "ticket_purchase",
+  "community_membership",
+] as const;
+export type PlatformChargeType = (typeof PLATFORM_CHARGE_TYPES)[number];
 
 export const TRANSACTION_STATUSES = [
   "pending",

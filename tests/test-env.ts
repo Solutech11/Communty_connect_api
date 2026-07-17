@@ -15,3 +15,7 @@ process.env.ZEPTOMAIL_SEND_MAIL_TOKEN = "test";
 process.env.MAIL_FROM_ADDRESS = "test@example.com";
 process.env.GROQ_API_KEY = "test";
 process.env.LOG_LEVEL = "silent";
+process.env.DEPOSIT_CHARGE_BPS = "100";
+process.env.WITHDRAWAL_CHARGE_BPS = "100";
+process.env.TICKET_CHARGE_BPS = "500";
+process.env.COMMUNITY_CHARGE_BPS = "500";

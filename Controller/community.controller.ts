@@ -94,13 +94,17 @@ export const updateCommunity = async (request: Request, response: Response): Pro
 
 export const joinCommunity = async (request: Request, response: Response): Promise<Response> => {
   const community = await CommunityModel.findOneAndUpdate(
-    { _id: (request.params.id as string), visibility: "public" },
+    {
+      _id: (request.params.id as string),
+      visibility: "public",
+      membershipType: { $ne: "premium" },
+    },
     { $addToSet: { members: request.auth?.id } },
     { new: true },
   );
 
   if (!community) {
-    throw new AppError(404, "Public community was not found", "COMMUNITY_NOT_FOUND");
+    throw new AppError(404, "Free public community was not found", "COMMUNITY_NOT_FOUND");
   }
 
   return sendSuccess(response, 200, "Community joined");

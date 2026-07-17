@@ -11,6 +11,8 @@ const communitySchema = new Schema(
     state: { type: String, index: true },
     lga: { type: String, index: true },
     visibility: { type: String, enum: ["public", "private"], default: "public" },
+    membershipType: { type: String, enum: ["free", "premium"], default: "free", index: true },
+    membershipPriceKobo: { type: Number, default: 0, min: 0 },
     members: [{ type: Schema.Types.ObjectId, ref: "User" }],
     moderators: [{ type: Schema.Types.ObjectId, ref: "User" }],
   },
@@ -18,6 +20,15 @@ const communitySchema = new Schema(
 );
 
 communitySchema.index({ name: "text", description: "text" });
+communitySchema.pre("validate", function validateMembershipPrice() {
+  if (this.membershipType === "premium" && this.membershipPriceKobo <= 0) {
+    this.invalidate("membershipPriceKobo", "Premium communities require a positive membership price");
+  }
+
+  if (this.membershipType === "free") {
+    this.membershipPriceKobo = 0;
+  }
+});
 
 export type Community = InferSchemaType<typeof communitySchema>;
 export const CommunityModel = (models.Community as Model<Community>) || model<Community>("Community", communitySchema);

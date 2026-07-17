@@ -1,6 +1,8 @@
 # Community Connect Backend Agent Guide
 
 This directory is the TypeScript, Express, MongoDB, Redis, Socket.IO, and third-party integration backend for Community Connect. The conventions below are durable and apply to every file under `backend/`.
+The reference to the frontend: C:\Users\Solutech\Documents\Lincoln\LincolnFinalyrEventapp\community_connect
+make sure most or any api you doing coordinates with the frontend here so go through the frontend to know the kind of endpoint, response to give.
 
 ## Reference Style
 

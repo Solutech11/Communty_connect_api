@@ -10,12 +10,17 @@ import {
   updateCommunity,
 } from "../../Controller/community.controller";
 import { authenticate, optionalAuthenticate } from "../../middleware/auth.middleware";
+import { requireIdempotencyKey } from "../../middleware/idempotency.middleware";
 import { validate } from "../../middleware/validate.middleware";
 import { idParamsSchema, paginationSchema } from "../../schemas/common.schemas";
 import { asyncHandler } from "../../utils/asyncHandler.utils";
+import {
+  createCommunityMembershipOrder,
+  verifyCommunityMembershipOrder,
+} from "../../Controller/communityPayment.controller";
 
 const router = Router();
-const communityBody = z.object({
+const communityBodyBase = z.object({
   name: z.string().trim().min(3).max(100),
   description: z.string().trim().min(20).max(2000),
   imageUrl: z.string().url().optional(),
@@ -23,7 +28,23 @@ const communityBody = z.object({
   state: z.string().trim().max(80).optional(),
   lga: z.string().trim().max(100).optional(),
   visibility: z.enum(["public", "private"]).default("public"),
+  membershipType: z.enum(["free", "premium"]).default("free"),
+  membershipPriceKobo: z.number().int().min(0).max(100_000_000_00).default(0),
 }).strict();
+const validMembershipPrice = (value: { membershipType?: string; membershipPriceKobo?: number }) => {
+  return value.membershipType !== "premium" || (value.membershipPriceKobo || 0) > 0;
+};
+const communityBody = communityBodyBase.refine(validMembershipPrice, {
+  message: "Premium communities require a positive membership price",
+  path: ["membershipPriceKobo"],
+});
+const communityUpdateBody = communityBodyBase
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, { message: "At least one field is required" })
+  .refine(validMembershipPrice, {
+    message: "Premium communities require a positive membership price",
+    path: ["membershipPriceKobo"],
+  });
 
 router.get(
   "/",
@@ -36,12 +57,25 @@ router.get(
   }),
   asyncHandler(listCommunities),
 );
+router.post(
+  "/:id/membership-orders",
+  authenticate,
+  requireIdempotencyKey,
+  validate({ params: idParamsSchema }),
+  asyncHandler(createCommunityMembershipOrder),
+);
+router.get(
+  "/membership-orders/:orderNumber/verify",
+  authenticate,
+  validate({ params: z.object({ orderNumber: z.string().min(12).max(80) }) }),
+  asyncHandler(verifyCommunityMembershipOrder),
+);
 router.get("/:id", optionalAuthenticate, validate({ params: idParamsSchema }), asyncHandler(getCommunity));
 router.post("/", authenticate, validate({ body: communityBody }), asyncHandler(createCommunity));
 router.patch(
   "/:id",
   authenticate,
-  validate({ params: idParamsSchema, body: communityBody.partial().refine((v) => Object.keys(v).length > 0) }),
+  validate({ params: idParamsSchema, body: communityUpdateBody }),
   asyncHandler(updateCommunity),
 );
 router.post("/:id/members", authenticate, validate({ params: idParamsSchema }), asyncHandler(joinCommunity));

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/admin/assets/admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Community Connect</p>
+      <h1>Operations dashboard</h1>
+    </div>
+    <form method="post" action="/admin/logout">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button class="button button-secondary" type="submit">Sign out</button>
+    </form>
+  </header>
+
+  <main class="dashboard">
+    <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
+
+    <section class="stats-grid" aria-label="Platform summary">
+      <article class="stat-card"><span>Users</span><strong><%= stats.userCount %></strong></article>
+      <article class="stat-card"><span>Awaiting approval</span><strong><%= stats.pendingEventCount %></strong></article>
+      <article class="stat-card"><span>Published events</span><strong><%= stats.publishedEventCount %></strong></article>
+      <article class="stat-card stat-accent"><span>Platform earnings</span><strong><%= formatNaira(stats.totalEarningsKobo) %></strong></article>
+    </section>
+
+    <section class="panel" id="events">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Moderation</p><h2>Event listings</h2></div>
+        <span class="count-pill"><%= events.length %> recent</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Event</th><th>Host</th><th>Schedule</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+          <% events.forEach((event) => { const creator = event.creatorId || {}; %>
+            <tr>
+              <td><strong><%= event.title %></strong><small><%= event.state %>, <%= event.lga %></small></td>
+              <td><%= creator.firstName || "Unknown" %> <%= creator.lastName || "" %><small><%= creator.email || "" %></small></td>
+              <td><%= new Date(event.startsAt).toLocaleString("en-NG") %></td>
+              <td><span class="status status-<%= event.status %>"><%= event.status.replaceAll("_", " ") %></span></td>
+              <td>
+                <% if (event.status === "pending_approval") { %>
+                  <form method="post" action="/admin/events/<%= event._id %>/approve">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button class="button button-primary button-small" type="submit">Approve</button>
+                  </form>
+                <% } else if (event.status === "published") { %>
+                  <form method="post" action="/admin/events/<%= event._id %>/deactivate" class="inline-form">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input name="reason" required minlength="5" maxlength="300" placeholder="Reason for deactivation">
+                    <button class="button button-danger button-small" type="submit">Deactivate</button>
+                  </form>
+                <% } else { %><span class="muted">No action</span><% } %>
+              </td>
+            </tr>
+          <% }) %>
+          <% if (!events.length) { %><tr><td colspan="5" class="empty">No events found.</td></tr><% } %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="earnings">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Revenue</p><h2>Charge earnings</h2></div>
+      </div>
+      <div class="breakdown-grid">
+        <% earningBreakdown.forEach((item) => { %>
+          <article class="mini-card"><span><%= item._id.replaceAll("_", " ") %></span><strong><%= formatNaira(item.totalKobo) %></strong><small><%= item.count %> charges</small></article>
+        <% }) %>
+        <% if (!earningBreakdown.length) { %><p class="empty">No completed charges yet.</p><% } %>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Source</th><th>Gross</th><th>Platform fee</th><th>Net/proceeds</th><th>Earned</th></tr></thead>
+          <tbody>
+          <% recentEarnings.forEach((earning) => { %>
+            <tr>
+              <td><strong><%= earning.sourceType.replaceAll("_", " ") %></strong><small><%= earning.sourceReference %></small></td>
+              <td><%= formatNaira(earning.grossAmountKobo) %></td>
+              <td class="money-positive"><%= formatNaira(earning.feeAmountKobo) %></td>
+              <td><%= formatNaira(earning.netAmountKobo) %></td>
+              <td><%= new Date(earning.earnedAt).toLocaleString("en-NG") %></td>
+            </tr>
+          <% }) %>
+          <% if (!recentEarnings.length) { %><tr><td colspan="5" class="empty">No earnings recorded.</td></tr><% } %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="users">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Accounts</p><h2>Users</h2></div>
+        <span class="count-pill"><%= users.length %> recent</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th></tr></thead>
+          <tbody>
+          <% users.forEach((user) => { %>
+            <tr>
+              <td><strong><%= user.firstName %> <%= user.lastName %></strong></td>
+              <td><%= user.email %></td>
+              <td><%= user.role %></td>
+              <td><span class="status status-<%= user.status %>"><%= user.status.replaceAll("_", " ") %></span></td>
+              <td><%= new Date(user.createdAt).toLocaleDateString("en-NG") %></td>
+            </tr>
+          <% }) %>
+          <% if (!users.length) { %><tr><td colspan="5" class="empty">No users found.</td></tr><% } %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

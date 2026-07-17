@@ -11,6 +11,13 @@ declare global {
 
     interface Request {
       auth?: AuthenticatedUser;
+      admin?: {
+        adminId: string;
+        userId: string;
+        sessionId: string;
+        csrfToken: string;
+        permissions: string[];
+      };
       requestId: string;
       rawBody?: Buffer;
       idempotencyKey?: string;

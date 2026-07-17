@@ -9,7 +9,15 @@ const transactionSchema = new Schema(
     counterpartyUserId: { type: Schema.Types.ObjectId, ref: "User", index: true },
     type: {
       type: String,
-      enum: ["topup", "internal_transfer", "withdrawal", "ticket_purchase", "refund", "adjustment"],
+      enum: [
+        "topup",
+        "internal_transfer",
+        "withdrawal",
+        "ticket_purchase",
+        "community_purchase",
+        "refund",
+        "adjustment",
+      ],
       required: true,
       index: true,
     },

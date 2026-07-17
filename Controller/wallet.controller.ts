@@ -20,6 +20,7 @@ import {
   verifyPaystackTransaction,
 } from "../utils/paystack.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
+import { calculatePlatformCharge, recordPlatformEarning } from "../utils/platformCharge.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const financialReference = (prefix: string): string => {
@@ -78,65 +79,73 @@ export const getTransaction = async (request: Request, response: Response): Prom
 };
 
 export const initializeTopup = async (request: Request, response: Response): Promise<Response> => {
+  const userId = request.auth?.id as string;
   const amountKobo = request.body.amountKobo;
+  const feeKobo = calculatePlatformCharge(amountKobo, "deposit");
+  const totalPayableKobo = amountKobo + feeKobo;
 
   if (amountKobo < env.MIN_TOPUP_KOBO) {
     throw new AppError(422, `Minimum top-up is ${env.MIN_TOPUP_KOBO} kobo`, "TOPUP_BELOW_MINIMUM");
   }
 
-  const wallet = await WalletModel.findOne({ userId: request.auth?.id, status: "active" });
+  return withRedisLock(CACHE_KEYS.lock("wallet-topup", userId), async () => {
+    const wallet = await WalletModel.findOne({ userId, status: "active" });
 
-  if (!wallet) {
-    throw new AppError(404, "Active wallet was not found", "WALLET_NOT_FOUND");
-  }
+    if (!wallet) {
+      throw new AppError(404, "Active wallet was not found", "WALLET_NOT_FOUND");
+    }
 
-  const idempotencyKey = request.idempotencyKey as string;
-  const existing = await TransactionModel.findOne({ userId: request.auth?.id, idempotencyKey });
+    const idempotencyKey = request.idempotencyKey as string;
+    const existing = await TransactionModel.findOne({ userId, idempotencyKey });
 
-  if (existing) {
-    return sendSuccess(response, 200, "Top-up already initialized", { transaction: existing });
-  }
+    if (existing) {
+      return sendSuccess(response, 200, "Top-up already initialized", { transaction: existing });
+    }
 
-  const reference = financialReference("topup");
-  const transaction = await TransactionModel.create({
-    reference,
-    providerReference: reference,
-    walletId: wallet._id,
-    userId: request.auth?.id,
-    type: "topup",
-    direction: "credit",
-    amountKobo,
-    status: "pending",
-    title: "Wallet top-up",
-    description: "Wallet funding through Paystack",
-    provider: "paystack",
-    idempotencyKey,
-  });
-
-  try {
-    const provider = await initializePaystackTransaction({
-      email: request.auth?.email as string,
-      amountKobo,
+    const reference = financialReference("topup");
+    const transaction = await TransactionModel.create({
       reference,
-      metadata: {
-        transactionId: transaction._id.toString(),
-        userId: request.auth?.id,
-        walletId: wallet._id.toString(),
-        purpose: "wallet_topup",
-      },
+      providerReference: reference,
+      walletId: wallet._id,
+      userId,
+      type: "topup",
+      direction: "credit",
+      amountKobo,
+      feeKobo,
+      status: "pending",
+      title: "Wallet top-up",
+      description: "Wallet funding through Paystack",
+      provider: "paystack",
+      idempotencyKey,
+      metadata: { walletCreditKobo: amountKobo, totalPayableKobo },
     });
-    return sendSuccess(response, 201, "Top-up initialized", {
-      transaction,
-      authorizationUrl: provider.authorization_url,
-      accessCode: provider.access_code,
-      reference: provider.reference,
-      publicKey: env.PAYSTACK_PUBLIC_KEY,
-    });
-  } catch (error) {
-    transaction.status = "failed";
-    await transaction.save();
-    throw error;
-  }
+
+    try {
+      const provider = await initializePaystackTransaction({
+        email: request.auth?.email as string,
+        amountKobo: totalPayableKobo,
+        reference,
+        metadata: {
+          transactionId: transaction._id.toString(),
+          userId,
+          walletId: wallet._id.toString(),
+          purpose: "wallet_topup",
+        },
+      });
+      return sendSuccess(response, 201, "Top-up initialized", {
+        transaction,
+        authorizationUrl: provider.authorization_url,
+        accessCode: provider.access_code,
+        reference: provider.reference,
+        publicKey: env.PAYSTACK_PUBLIC_KEY,
+        charge: { walletCreditKobo: amountKobo, feeKobo, totalPayableKobo },
+      });
+    } catch (error) {
+      transaction.status = "failed";
+      await transaction.save();
+      throw error;
+    }
+  });
 };
 
 export const verifyTopup = async (request: Request, response: Response): Promise<Response> => {
@@ -152,7 +161,9 @@ export const verifyTopup = async (request: Request, response: Response): Promise
 
   const provider = await verifyPaystackTransaction((request.params.reference as string));
 
-  if (provider.status !== "success" || provider.amount !== transaction.amountKobo) {
+  const totalPayableKobo = transaction.amountKobo + (transaction.feeKobo || 0);
+
+  if (provider.status !== "success" || provider.amount !== totalPayableKobo) {
     throw new AppError(409, "Payment is not confirmed", "PAYMENT_NOT_CONFIRMED");
   }
 
@@ -175,7 +186,10 @@ export const creditVerifiedTopup = async (reference: string, providerAmount?: nu
         return;
       }
 
-      if (providerAmount !== undefined && providerAmount !== transaction.amountKobo) {
+      const feeKobo = transaction.feeKobo || 0;
+      const totalPayableKobo = transaction.amountKobo + feeKobo;
+
+      if (providerAmount !== undefined && providerAmount !== totalPayableKobo) {
         throw new AppError(409, "Payment amount does not match", "PAYMENT_AMOUNT_MISMATCH");
       }
 
@@ -192,6 +206,16 @@ export const creditVerifiedTopup = async (reference: string, providerAmount?: nu
       transaction.status = "successful";
       transaction.completedAt = new Date();
       await transaction.save({ session });
+      await recordPlatformEarning({
+        sourceType: "deposit",
+        sourceReference: transaction.reference,
+        payerUserId: transaction.userId,
+        transactionId: transaction._id,
+        grossAmountKobo: totalPayableKobo,
+        feeAmountKobo: feeKobo,
+        netAmountKobo: transaction.amountKobo,
+        session,
+      });
     });
   } finally {
     await session.endSession();
@@ -374,7 +398,13 @@ export const internalTransfer = async (request: Request, response: Response): Pr
 export const withdraw = async (request: Request, response: Response): Promise<Response> => {
   const userId = request.auth?.id as string;
   const amountKobo = request.body.amountKobo;
+  const feeKobo = calculatePlatformCharge(amountKobo, "withdrawal");
+  const payoutAmountKobo = amountKobo - feeKobo;
   const idempotencyKey = request.idempotencyKey as string;
+
+  if (payoutAmountKobo <= 0) {
+    throw new AppError(422, "Withdrawal charge leaves no payable amount", "INVALID_WITHDRAWAL_CHARGE");
+  }
 
   if (amountKobo < env.MIN_WITHDRAWAL_KOBO) {
     throw new AppError(
@@ -407,7 +437,12 @@ export const withdraw = async (request: Request, response: Response): Promise<Re
       await session.withTransaction(async () => {
         const wallet = await WalletModel.findOneAndUpdate(
           { userId, status: "active", availableBalanceKobo: { $gte: amountKobo } },
-          { $inc: { availableBalanceKobo: -amountKobo, pendingBalanceKobo: amountKobo } },
+          {
+            $inc: {
+              availableBalanceKobo: -amountKobo,
+              pendingBalanceKobo: amountKobo,
+            },
+          },
           { new: true, session },
         );
 
@@ -425,12 +460,17 @@ export const withdraw = async (request: Request, response: Response): Promise<Re
               type: "withdrawal",
               direction: "debit",
               amountKobo,
+              feeKobo,
               status: "processing",
               title: "Wallet withdrawal",
               description: `Withdrawal to ${bankAccount.bankName} ${bankAccount.maskedAccountNumber}`,
               provider: "paystack",
               idempotencyKey,
-              metadata: { bankAccountId: bankAccount._id.toString(), refundApplied: false },
+              metadata: {
+                bankAccountId: bankAccount._id.toString(),
+                refundApplied: false,
+                payoutAmountKobo,
+              },
             },
           ],
           { session },
@@ -445,7 +485,7 @@ export const withdraw = async (request: Request, response: Response): Promise<Re
 
     try {
       const provider = await initiatePaystackTransfer({
-        amountKobo,
+        amountKobo: payoutAmountKobo,
         recipientCode: bankAccount.paystackRecipientCode as string,
         reference,
         reason: "Community Connect wallet withdrawal",
@@ -455,7 +495,10 @@ export const withdraw = async (request: Request, response: Response): Promise<Re
         { $set: { "metadata.transferCode": provider.transfer_code, "metadata.providerStatus": provider.status } },
       );
       const refreshed = await TransactionModel.findById(transaction?._id);
-      return sendSuccess(response, 202, "Withdrawal submitted", { transaction: refreshed });
+      return sendSuccess(response, 202, "Withdrawal submitted", {
+        transaction: refreshed,
+        charge: { withdrawalAmountKobo: amountKobo, feeKobo, payoutAmountKobo },
+      });
     } catch (error) {
       await refundWithdrawal(reference, "provider_initialization_failed");
       throw error;
@@ -499,14 +542,32 @@ export const completeWithdrawal = async (reference: string): Promise<void> => {
         return;
       }
 
-      await WalletModel.updateOne(
+      const metadata = transaction.metadata as { payoutAmountKobo?: number };
+      const payoutAmountKobo = metadata.payoutAmountKobo
+        ?? transaction.amountKobo - (transaction.feeKobo || 0);
+      const walletResult = await WalletModel.updateOne(
         { _id: transaction.walletId, pendingBalanceKobo: { $gte: transaction.amountKobo } },
         { $inc: { pendingBalanceKobo: -transaction.amountKobo } },
         { session },
       );
+
+      if (walletResult.modifiedCount !== 1) {
+        throw new AppError(409, "Reserved withdrawal funds are unavailable", "WITHDRAWAL_RESERVE_MISSING");
+      }
+
       transaction.status = "successful";
       transaction.completedAt = new Date();
       await transaction.save({ session });
+      await recordPlatformEarning({
+        sourceType: "withdrawal",
+        sourceReference: transaction.reference,
+        payerUserId: transaction.userId,
+        transactionId: transaction._id,
+        grossAmountKobo: transaction.amountKobo,
+        feeAmountKobo: transaction.feeKobo || 0,
+        netAmountKobo: payoutAmountKobo,
+        session,
+      });
     });
   } finally {
     await session.endSession();

@@ -7,7 +7,10 @@ const ticketOrderSchema = new Schema(
     ticketTypeId: { type: Schema.Types.ObjectId, ref: "TicketType", required: true },
     buyerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     quantity: { type: Number, required: true, min: 1, max: 20 },
+    ticketSubtotalKobo: { type: Number, required: true, default: 0, min: 0 },
     totalKobo: { type: Number, required: true, min: 0 },
+    platformFeeKobo: { type: Number, required: true, default: 0, min: 0 },
+    organizerProceedsKobo: { type: Number, required: true, default: 0, min: 0 },
     status: {
       type: String,
       enum: ["pending", "paid", "cancelled", "refunded"],

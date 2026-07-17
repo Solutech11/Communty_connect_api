@@ -1,4 +1,5 @@
-﻿import express from "express";
+﻿import path from "node:path";
+import express from "express";
 import pinoHttp from "pino-http";
 import swaggerUi from "swagger-ui-express";
 import { env } from "./Config/env";
@@ -15,15 +16,26 @@ import {
   securityMiddleware,
 } from "./middleware/security.middleware";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
+import { adminErrorHandler } from "./middleware/admin.middleware";
 import { requestContext } from "./middleware/requestContext.middleware";
 import apiRouter from "./router";
+import adminRouter from "./router/admin/Admin.web";
 import Socket from "./Socket/Socket";
 import { logger } from "./utils/logger.utils";
 
 const app = express();
 
 app.disable("x-powered-by");
+app.set("view engine", "ejs");
+app.set("views", path.join(process.cwd(), "views"));
+app.set("view cache", env.isProduction);
 app.set("trust proxy", env.TRUST_PROXY);
+app.use("/admin/assets", express.static(path.join(process.cwd(), "public", "admin"), {
+  dotfiles: "deny",
+  fallthrough: false,
+  immutable: env.isProduction,
+  maxAge: env.isProduction ? "1d" : 0,
+}));
 app.use(requestContext);
 app.use(
   pinoHttp({
@@ -71,6 +83,9 @@ app.use(
     swaggerOptions: { persistAuthorization: true },
   }),
 );
+
+app.use("/admin", adminRouter);
+app.use("/admin", adminErrorHandler);
 
 app.use(`${env.API_PREFIX}/auth`, authRateLimiter);
 app.use(`${env.API_PREFIX}/ai`, aiRateLimiter);

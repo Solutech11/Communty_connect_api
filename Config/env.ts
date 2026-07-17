@@ -30,6 +30,10 @@ const envSchema = z.object({
   PAYSTACK_CURRENCY: z.string().length(3).default("NGN"),
   MIN_TOPUP_KOBO: z.coerce.number().int().positive().default(10000),
   MIN_WITHDRAWAL_KOBO: z.coerce.number().int().positive().default(100000),
+  DEPOSIT_CHARGE_BPS: z.coerce.number().int().min(0).max(10_000).default(100),
+  WITHDRAWAL_CHARGE_BPS: z.coerce.number().int().min(0).max(10_000).default(100),
+  TICKET_CHARGE_BPS: z.coerce.number().int().min(0).max(10_000).default(500),
+  COMMUNITY_CHARGE_BPS: z.coerce.number().int().min(0).max(10_000).default(500),
   CLOUDINARY_CLOUD_NAME: z.string().min(1),
   CLOUDINARY_API_KEY: z.string().min(1),
   CLOUDINARY_API_SECRET: z.string().min(1),
@@ -45,6 +49,7 @@ const envSchema = z.object({
   MAX_IMAGE_SIZE_BYTES: z.coerce.number().int().positive().default(5242880),
   JSON_BODY_LIMIT: z.string().default("100kb"),
   BOOTSTRAP_ADMIN_EMAIL: z.string().email().or(z.literal("")).optional().default(""),
+  ADMIN_SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { env } from "../Config/env";
+import { CACHE_KEYS } from "../Constant";
 import { EventModel } from "../models/Event/Event.model";
 import { TicketOrderModel } from "../models/Event/TicketOrder.model";
 import { TicketTypeModel } from "../models/Event/TicketType.model";
@@ -20,6 +21,8 @@ import {
   verifyPaystackTransaction,
 } from "../utils/paystack.utils";
 import { sendSuccess } from "../utils/response.utils";
+import { withRedisLock } from "../utils/redisLock.utils";
+import { calculatePlatformCharge, recordPlatformEarning } from "../utils/platformCharge.utils";
 
 const orderNumber = (): string => `CC-${Date.now()}-${randomUUID().slice(0, 8).toUpperCase()}`;
 const paymentReference = (): string => `ticket_${randomUUID()}`.toLowerCase();
@@ -37,6 +40,8 @@ export const createTicketOrder = async (
 ): Promise<Response> => {
   const userId = request.auth?.id as string;
   const idempotencyKey = request.idempotencyKey as string;
+
+  return withRedisLock(CACHE_KEYS.lock("ticket-order", userId), async () => {
   const existing = await TicketOrderModel.findOne({ buyerId: userId, idempotencyKey })
     .select("+checkoutUrl");
 
@@ -100,7 +105,10 @@ export const createTicketOrder = async (
   }
 
   const reference = paymentReference();
-  const totalKobo = ticketType.priceKobo * quantity;
+  const ticketSubtotalKobo = ticketType.priceKobo * quantity;
+  const platformFeeKobo = calculatePlatformCharge(ticketSubtotalKobo, "ticket_purchase");
+  const organizerProceedsKobo = ticketSubtotalKobo;
+  const totalKobo = ticketSubtotalKobo + platformFeeKobo;
   const qrToken = createOpaqueToken(48);
   let order;
 
@@ -111,7 +119,10 @@ export const createTicketOrder = async (
       ticketTypeId: ticketType._id,
       buyerId: userId,
       quantity,
+      ticketSubtotalKobo,
       totalKobo,
+      platformFeeKobo,
+      organizerProceedsKobo,
       paymentReference: reference,
       idempotencyKey,
       qrTokenHash: sha256(qrToken),
@@ -127,12 +138,18 @@ export const createTicketOrder = async (
       type: "ticket_purchase",
       direction: "debit",
       amountKobo: totalKobo,
+      feeKobo: platformFeeKobo,
       status: totalKobo === 0 ? "processing" : "pending",
       title: `Ticket for ${event.title}`,
       description: `${quantity} x ${ticketType.title}`,
       provider: totalKobo === 0 ? "internal" : "paystack",
       idempotencyKey,
-      metadata: { orderId: order._id.toString(), eventId: event._id.toString() },
+      metadata: {
+        orderId: order._id.toString(),
+        eventId: event._id.toString(),
+        organizerUserId: event.creatorId.toString(),
+        organizerProceedsKobo,
+      },
     });
 
     if (totalKobo === 0) {
@@ -161,6 +178,7 @@ export const createTicketOrder = async (
       checkoutUrl: checkout.authorization_url,
       accessCode: checkout.access_code,
       publicKey: env.PAYSTACK_PUBLIC_KEY,
+      charge: { ticketSubtotalKobo, platformFeeKobo, totalPayableKobo: totalKobo },
     });
   } catch (error) {
     await Promise.all([
@@ -172,6 +190,7 @@ export const createTicketOrder = async (
     ]);
     throw error;
   }
+  });
 };
 
 export const completeTicketOrder = async (
@@ -207,13 +226,54 @@ export const completeTicketOrder = async (
         throw new AppError(409, "Ticket reservation is unavailable", "TICKET_RESERVATION_LOST");
       }
 
+      const event = await EventModel.findById(order.eventId).session(session);
+      if (!event) {
+        throw new AppError(409, "Ticket event is unavailable", "EVENT_UNAVAILABLE");
+      }
+
+      const platformFeeKobo = order.platformFeeKobo || 0;
+      const ticketSubtotalKobo = order.ticketSubtotalKobo
+        || Math.max(0, order.totalKobo - platformFeeKobo);
+      const organizerProceedsKobo = ticketSubtotalKobo;
+
+      if (organizerProceedsKobo > 0) {
+        const organizerWallet = await WalletModel.findOneAndUpdate(
+          { userId: event.creatorId, status: "active" },
+          { $inc: { availableBalanceKobo: organizerProceedsKobo } },
+          { new: true, session },
+        );
+
+        if (!organizerWallet) {
+          throw new AppError(409, "Organizer wallet is unavailable", "ORGANIZER_WALLET_UNAVAILABLE");
+        }
+      }
+
+      const transaction = await TransactionModel.findOne({
+        providerReference: reference,
+        status: { $in: ["pending", "processing"] },
+      }).session(session);
+
+      if (!transaction) {
+        throw new AppError(409, "Ticket transaction is unavailable", "TRANSACTION_UNAVAILABLE");
+      }
+
       order.status = "paid";
       await order.save({ session });
-      await TransactionModel.updateOne(
-        { providerReference: reference, status: { $in: ["pending", "processing"] } },
-        { status: "successful", completedAt: new Date() },
-        { session },
-      );
+      transaction.status = "successful";
+      transaction.completedAt = new Date();
+      await transaction.save({ session });
+      await recordPlatformEarning({
+        sourceType: "ticket_purchase",
+        sourceReference: reference,
+        payerUserId: order.buyerId,
+        beneficiaryUserId: event.creatorId,
+        transactionId: transaction._id,
+        grossAmountKobo: order.totalKobo,
+        feeAmountKobo: platformFeeKobo,
+        netAmountKobo: organizerProceedsKobo,
+        metadata: { orderId: order._id.toString(), eventId: event._id.toString() },
+        session,
+      });
       paidOrderId = order._id.toString();
       buyerId = order.buyerId.toString();
     });

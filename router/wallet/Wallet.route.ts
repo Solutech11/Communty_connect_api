@@ -29,7 +29,15 @@ router.get(
     query: z.object({
       page: z.coerce.number().int().min(1).default(1),
       limit: z.coerce.number().int().min(1).max(100).default(20),
-      type: z.enum(["topup", "internal_transfer", "withdrawal", "ticket_purchase", "refund", "adjustment"]).optional(),
+      type: z.enum([
+        "topup",
+        "internal_transfer",
+        "withdrawal",
+        "ticket_purchase",
+        "community_purchase",
+        "refund",
+        "adjustment",
+      ]).optional(),
       status: z.enum(["pending", "processing", "successful", "failed", "reversed"]).optional(),
       direction: z.enum(["credit", "debit"]).optional(),
     }),

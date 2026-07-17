@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 
 const testFiles = [
+  "tests/admin-views.test.ts",
+  "tests/charges.test.ts",
   "tests/crypto.test.ts",
   "tests/docs.test.ts",
   "tests/recommendation.test.ts",
