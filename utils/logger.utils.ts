@@ -2,6 +2,7 @@ import pino from "pino";
 import { env } from "../Config/env";
 
 export const logger = pino({
+  serializers: { error: pino.stdSerializers.err },
   level: env.LOG_LEVEL,
   redact: {
     paths: [
