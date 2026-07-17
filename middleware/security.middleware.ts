@@ -1,13 +1,13 @@
 import compression from "compression";
 import cors, { type CorsOptions } from "cors";
 import type { NextFunction, Request, Response } from "express";
-import { rateLimit } from "express-rate-limit";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 import { slowDown } from "express-slow-down";
 import helmet from "helmet";
 import hpp from "hpp";
 import { RedisStore } from "rate-limit-redis";
 import { env } from "../Config/env";
-import { redisClient } from "../DB/redis";
+import { redisClient, waitForRedisReady } from "../DB/redis";
 import { AppError } from "../utils/AppError";
 
 const corsOptions: CorsOptions = {
@@ -30,7 +30,13 @@ const corsOptions: CorsOptions = {
 const rateLimitStore = (prefix: string) => {
   return new RedisStore({
     prefix,
-    sendCommand: (...args: string[]) => redisClient.sendCommand(args),
+    sendCommand: async (...args: string[]) => {
+      // RedisStore eagerly loads Lua scripts while this module is imported.
+      // Startup connects Redis later, so defer commands without connecting as
+      // an import side effect or weakening the distributed rate limit.
+      await waitForRedisReady();
+      return redisClient.sendCommand(args);
+    },
   });
 };
 
@@ -75,7 +81,13 @@ export const aiRateLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
   store: rateLimitStore("rl:ai:"),
-  keyGenerator: (request) => request.auth?.id || request.ip || "unknown",
+  keyGenerator: (request) => {
+    if (request.auth?.id) {
+      return `user:${request.auth.id}`;
+    }
+
+    return `ip:${ipKeyGenerator(request.ip || "unknown")}`;
+  },
 });
 
 export const requestSlowdown = slowDown({

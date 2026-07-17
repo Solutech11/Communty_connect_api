@@ -186,6 +186,11 @@ export const updateEvent = async (request: Request, response: Response): Promise
   }
 
   event.set(request.body);
+
+  if (event.endsAt <= event.startsAt) {
+    throw new AppError(422, "End date must be after start date", "INVALID_EVENT_DATES");
+  }
+
   await event.save();
   return sendSuccess(response, 200, "Event updated", { event });
 };

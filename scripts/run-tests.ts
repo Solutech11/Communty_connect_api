@@ -5,6 +5,7 @@ const testFiles = [
   "tests/crypto.test.ts",
   "tests/docs.test.ts",
   "tests/recommendation.test.ts",
+  "tests/security.test.ts",
 ];
 
 const runTestFile = async (testFile: string): Promise<void> => {

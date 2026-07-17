@@ -24,7 +24,7 @@ import { idParamsSchema, objectIdSchema, paginationSchema } from "../../schemas/
 import { asyncHandler } from "../../utils/asyncHandler.utils";
 
 const router = Router();
-const eventBody = z.object({
+const eventBodyBase = z.object({
   title: z.string().trim().min(4).max(140),
   description: z.string().trim().min(20).max(5000),
   coverImageUrl: z.string().url().optional(),
@@ -46,10 +46,27 @@ const eventBody = z.object({
   contactPhone: z.string().trim().min(7).max(24).optional(),
   maxCapacity: z.number().int().min(1).max(1_000_000),
   tags: z.array(z.string().trim().min(1).max(40)).max(10).default([]),
-}).strict().refine((value) => value.endsAt > value.startsAt, {
+}).strict();
+const eventBody = eventBodyBase.refine((value) => value.endsAt > value.startsAt, {
   message: "End date must be after start date",
   path: ["endsAt"],
 });
+const eventUpdateBody = eventBodyBase
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one event field is required",
+  })
+  .refine(
+    (value) => (
+      value.startsAt === undefined
+      || value.endsAt === undefined
+      || value.endsAt > value.startsAt
+    ),
+    {
+      message: "End date must be after start date",
+      path: ["endsAt"],
+    },
+  );
 const ticketBody = z.object({
   title: z.string().trim().min(2).max(80),
   description: z.string().trim().max(300).optional(),
@@ -103,7 +120,7 @@ router.post("/", authenticate, validate({ body: eventBody }), asyncHandler(creat
 router.patch(
   "/:id",
   authenticate,
-  validate({ params: idParamsSchema, body: eventBody.partial().refine((v) => Object.keys(v).length > 0) }),
+  validate({ params: idParamsSchema, body: eventUpdateBody }),
   asyncHandler(updateEvent),
 );
 router.post(
