@@ -103,5 +103,5 @@ export const apiEndpoints: EndpointDefinition[] = [
   { method: "post", path: "/wallet/withdrawals/{reference}/finalize", tag: "Wallet", summary: "Finalize withdrawal OTP", description: "Finalizes a user-owned transfer only when Paystack requires OTP.", auth: true, requestBody: true },
 
   { method: "post", path: "/uploads/images", tag: "Uploads", summary: "Upload image", description: "Uploads one authenticated JPEG, PNG, or WebP image through memory storage to Cloudinary.", auth: true, requestBody: true },
-  { method: "post", path: "/webhooks/paystack", tag: "Webhooks", summary: "Receive Paystack webhook", description: "Verifies HMAC-SHA512 over the raw body, deduplicates events, and applies idempotent wallet transitions.", auth: false },
+  { method: "post", path: "/webhooks/paystack", tag: "Webhooks", summary: "Receive Paystack webhook", description: "Verifies HMAC-SHA512 over the raw body, deduplicates events, and applies idempotent wallet transitions.", auth: false, requestBody: true },
 ];

@@ -1,6 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { apiEndpoints } from "../docs/endpoint-registry";
+import {
+  queryParameterContracts,
+  requestBodyContracts,
+  successContracts,
+} from "../docs/openapi-contracts";
 
 const routeRoot = path.resolve(process.cwd(), "router");
 
@@ -36,13 +41,42 @@ const main = async (): Promise<void> => {
     throw new Error(`Duplicate endpoint documentation: ${[...new Set(duplicates)].join(", ")}`);
   }
 
+  const endpointKeySet = new Set(keys);
+  const successKeys = Object.keys(successContracts);
+  const missingSuccessExamples = keys.filter((key) => !successContracts[key]);
+  const extraSuccessExamples = successKeys.filter((key) => !endpointKeySet.has(key));
+  if (missingSuccessExamples.length > 0 || extraSuccessExamples.length > 0) {
+    throw new Error(
+      `OpenAPI success-example drift. Missing: ${missingSuccessExamples.join(", ") || "none"}; extra: ${extraSuccessExamples.join(", ") || "none"}.`,
+    );
+  }
+
+  const expectedBodyKeys = apiEndpoints
+    .filter((endpoint) => endpoint.requestBody)
+    .map((endpoint) => `${endpoint.method.toUpperCase()} ${endpoint.path}`);
+  const missingRequestBodies = expectedBodyKeys.filter((key) => !requestBodyContracts[key]);
+  const extraRequestBodies = Object.keys(requestBodyContracts).filter(
+    (key) => !expectedBodyKeys.includes(key),
+  );
+  if (missingRequestBodies.length > 0 || extraRequestBodies.length > 0) {
+    throw new Error(
+      `OpenAPI request-body drift. Missing: ${missingRequestBodies.join(", ") || "none"}; extra: ${extraRequestBodies.join(", ") || "none"}.`,
+    );
+  }
+
+  const invalidQueryContracts = Object.keys(queryParameterContracts).filter(
+    (key) => !endpointKeySet.has(key),
+  );
+  if (invalidQueryContracts.length > 0) {
+    throw new Error(`OpenAPI query contracts reference unknown routes: ${invalidQueryContracts.join(", ")}`);
+  }
   if (routeCount !== apiEndpoints.length) {
     throw new Error(
       `Route documentation drift: found ${routeCount} Express routes but ${apiEndpoints.length} API docs entries.`,
     );
   }
 
-  process.stdout.write(`Documented ${apiEndpoints.length} API routes across ${routeFiles.length} route files.\n`);
+  process.stdout.write(`Documented ${apiEndpoints.length} API routes with request contracts and response examples across ${routeFiles.length} route files.\n`);
 };
 
 void main();

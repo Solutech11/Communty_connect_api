@@ -58,6 +58,7 @@ yarn start        # start compiled build
 - Failure: `{ "success": false, "error": { "code": "...", "message": "..." }, "requestId": "..." }`
 - Interactive Swagger: `GET /api/docs`
 - OpenAPI JSON: `GET /api/docs.json`
+- Every Swagger operation includes concrete body/query/header schemas, request examples, success examples, and reusable error examples.
 - Process health: `GET /health`
 
 ## Complete Endpoint Catalog
