@@ -223,6 +223,8 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 ## Admin Portal and Platform Charges
 
 - Visit `/admin/login` and sign in with an active user whose role is `admin`. The `BOOTSTRAP_ADMIN_EMAIL` registration flow remains the only public bootstrap path.
+- The portal is sectioned into moderation, members, administrator team, and revenue areas. Administrators with `admins:manage` can create active verified administrator accounts; their passwords are hashed before storage.
+- Administrators with `users:moderate` can block active non-admin accounts. Blocking revokes refresh sessions immediately; unblocking restores the member account. Administrator accounts cannot be blocked through the portal.
 - Admin browser sessions are hashed in MongoDB, expire automatically, bind to IP and user agent, use secure HttpOnly SameSite cookies, and require CSRF tokens for every action.
 - Events submitted through `POST /events/{id}/publish` remain `pending_approval` until approved in the portal. Published events can be deactivated with a recorded reason.
 - Platform percentages are configured as integer basis points: `DEPOSIT_CHARGE_BPS`, `WITHDRAWAL_CHARGE_BPS`, `TICKET_CHARGE_BPS`, and `COMMUNITY_CHARGE_BPS`.
@@ -247,6 +249,8 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 - This ranking runs locally in TypeScript/MongoDB and does not call Groq.
 
 ## Security Notes
+
+- Development accepts browser origins to support local and LAN testing. Production accepts only the explicit `FRONTEND_URLS` allowlist.
 
 - Access tokens are short-lived. Refresh JWTs are hashed in MongoDB, rotated on every use, and tracked by family for replay response.
 - Password/credential changes increment `tokenVersion` so previously issued access tokens stop working.

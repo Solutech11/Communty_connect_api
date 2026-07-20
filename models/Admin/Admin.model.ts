@@ -1,4 +1,14 @@
-import { Schema, model, models, type InferSchemaType, type Model } from "mongoose";
+﻿import { Schema, model, models, type InferSchemaType, type Model } from "mongoose";
+
+export const ADMIN_PERMISSIONS = [
+  "users:read",
+  "users:moderate",
+  "events:moderate",
+  "earnings:read",
+  "admins:manage",
+] as const;
+
+export type AdminPermission = typeof ADMIN_PERMISSIONS[number];
 
 const adminSchema = new Schema(
   {
@@ -6,7 +16,7 @@ const adminSchema = new Schema(
     active: { type: Boolean, default: true, index: true },
     permissions: [{
       type: String,
-      enum: ["users:read", "events:moderate", "earnings:read"],
+      enum: ADMIN_PERMISSIONS,
     }],
     lastLoginAt: { type: Date },
   },

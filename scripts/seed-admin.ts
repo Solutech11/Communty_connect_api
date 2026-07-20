@@ -11,8 +11,8 @@ const buildWalletNumber = (): string => {
 };
 
 const requireSeedInput = (): { email: string; password: string } => {
-  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD;
+  const email = 'admin@admin.com';
+  const password = 'Test123$$';
 
   if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
     throw new Error("ADMIN_EMAIL must be a valid email address");

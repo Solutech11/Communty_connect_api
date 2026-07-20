@@ -1,11 +1,14 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import {
   approveEventFromAdmin,
+  blockUserFromAdmin,
+  createAdminFromPortal,
   deactivateEventFromAdmin,
   loginAdmin,
   logoutAdmin,
   renderAdminDashboard,
   renderAdminLogin,
+  unblockUserFromAdmin,
 } from "../../Controller/admin.controller";
 import {
   authenticateAdminPage,
@@ -27,6 +30,24 @@ router.get(
   asyncHandler(renderAdminDashboard),
 );
 router.post("/logout", requireAdminCsrf, asyncHandler(logoutAdmin));
+router.post(
+  "/admins",
+  requireAdminPermission("admins:manage"),
+  requireAdminCsrf,
+  asyncHandler(createAdminFromPortal),
+);
+router.post(
+  "/users/:id/block",
+  requireAdminPermission("users:moderate"),
+  requireAdminCsrf,
+  asyncHandler(blockUserFromAdmin),
+);
+router.post(
+  "/users/:id/unblock",
+  requireAdminPermission("users:moderate"),
+  requireAdminCsrf,
+  asyncHandler(unblockUserFromAdmin),
+);
 router.post(
   "/events/:id/approve",
   requireAdminPermission("events:moderate"),

@@ -78,11 +78,16 @@ if (parsed.data.NODE_ENV === "production") {
   }
 }
 
+const configuredBrowserOrigins = parsed.data.FRONTEND_URLS.split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const appOrigin = new URL(parsed.data.APP_BASE_URL).origin;
+
 export const env = {
   ...parsed.data,
-  allowedOrigins: parsed.data.FRONTEND_URLS.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean),
+  // The server-rendered admin portal posts back to APP_BASE_URL. Include that
+  // same origin so CORS does not reject its browser form submissions.
+  allowedOrigins: [...new Set([...configuredBrowserOrigins, appOrigin])],
   isProduction: parsed.data.NODE_ENV === "production",
   isTest: parsed.data.NODE_ENV === "test",
 };

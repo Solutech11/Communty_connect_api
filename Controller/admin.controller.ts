@@ -1,12 +1,14 @@
-import bcrypt from "bcrypt";
+﻿import bcrypt from "bcrypt";
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { env } from "../Config/env";
-import { AdminModel } from "../models/Admin/Admin.model";
+import { ADMIN_PERMISSIONS, AdminModel } from "../models/Admin/Admin.model";
 import { AdminSessionModel } from "../models/Admin/AdminSession.model";
 import { PlatformEarningModel } from "../models/Admin/PlatformEarning.model";
+import { RefreshTokenModel } from "../models/Auth/RefreshToken.model";
 import { UserModel } from "../models/Auth/User.model";
+import { WalletModel } from "../models/Wallet/Wallet.model";
 import { EventModel } from "../models/Event/Event.model";
 import { TicketTypeModel } from "../models/Event/TicketType.model";
 import {
@@ -15,14 +17,28 @@ import {
   ADMIN_SESSION_COOKIE,
   parseCookies,
 } from "../middleware/admin.middleware";
+import { passwordSchema } from "../schemas/common.schemas";
 import { AppError } from "../utils/AppError";
 import { createOpaqueToken, secureEqual, sha256 } from "../utils/crypto.utils";
+import { logger } from "../utils/logger.utils";
 
 const adminLoginSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(1).max(128),
   _csrf: z.string().min(32).max(256),
 }).strict();
+
+const createAdminSchema = z.object({
+  firstName: z.string().trim().min(2).max(60),
+  lastName: z.string().trim().min(2).max(60),
+  email: z.string().trim().email().max(254),
+  password: passwordSchema,
+  _csrf: z.string().min(32).max(256),
+}).strict();
+
+const idParamsSchema = z.object({
+  id: z.string().regex(/^[a-fA-F0-9]{24}$/),
+});
 
 const cookieOptions = {
   httpOnly: true,
@@ -38,6 +54,35 @@ const issueLoginCsrf = (response: Response): string => {
     maxAge: 15 * 60 * 1000,
   });
   return token;
+};
+
+const buildWalletNumber = (): string => {
+  const random = Math.floor(100_000_000 + Math.random() * 900_000_000);
+  return "CC" + random;
+};
+
+const allocateWalletNumber = async (): Promise<string> => {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const walletNumber = buildWalletNumber();
+    if (!(await WalletModel.exists({ walletNumber }))) {
+      return walletNumber;
+    }
+  }
+
+  throw new AppError(503, "A wallet number could not be allocated. Please retry.", "WALLET_NUMBER_UNAVAILABLE");
+};
+
+const redirectWithMessage = (response: Response, message: string): void => {
+  response.redirect("/admin?message=" + encodeURIComponent(message));
+};
+
+const parseUserId = (request: Request): string => {
+  const parsed = idParamsSchema.safeParse(request.params);
+  if (!parsed.success) {
+    throw new AppError(400, "User identifier is invalid", "INVALID_IDENTIFIER");
+  }
+
+  return parsed.data.id;
 };
 
 export const renderAdminLogin = async (
@@ -92,10 +137,9 @@ export const loginAdmin = async (request: Request, response: Response): Promise<
     { userId: user._id },
     {
       $set: { lastLoginAt: new Date() },
-      $setOnInsert: {
-        active: true,
-        permissions: ["users:read", "events:moderate", "earnings:read"],
-      },
+      // Existing administrators receive newly introduced portal permissions.
+      $addToSet: { permissions: { $each: ADMIN_PERMISSIONS } },
+      $setOnInsert: { active: true },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
@@ -144,8 +188,10 @@ export const renderAdminDashboard = async (
   const [
     users,
     events,
+    admins,
     recentEarnings,
     userCount,
+    suspendedUserCount,
     pendingEventCount,
     publishedEventCount,
     earningTotals,
@@ -161,6 +207,10 @@ export const renderAdminDashboard = async (
       .sort({ submittedAt: -1, createdAt: -1 })
       .limit(100)
       .lean(),
+    AdminModel.find()
+      .populate("userId", "firstName lastName email status")
+      .sort({ createdAt: -1 })
+      .lean(),
     PlatformEarningModel.find({ status: "earned" })
       .populate("payerUserId", "firstName lastName email")
       .populate("beneficiaryUserId", "firstName lastName email")
@@ -168,6 +218,7 @@ export const renderAdminDashboard = async (
       .limit(100)
       .lean(),
     UserModel.countDocuments(),
+    UserModel.countDocuments({ status: "suspended" }),
     EventModel.countDocuments({ status: "pending_approval" }),
     EventModel.countDocuments({ status: "published" }),
     PlatformEarningModel.aggregate<{ totalKobo: number }>([
@@ -190,12 +241,15 @@ export const renderAdminDashboard = async (
   response.render("admin/dashboard", {
     title: "Community Connect Admin",
     csrfToken: request.admin?.csrfToken,
+    permissions: request.admin?.permissions || [],
     users,
     events,
+    admins,
     recentEarnings,
     earningBreakdown,
     stats: {
       userCount,
+      suspendedUserCount,
       pendingEventCount,
       publishedEventCount,
       totalEarningsKobo: earningTotals[0]?.totalKobo || 0,
@@ -208,6 +262,113 @@ export const renderAdminDashboard = async (
       }).format(kobo / 100);
     },
   });
+};
+
+export const createAdminFromPortal = async (
+  request: Request,
+  response: Response,
+): Promise<void> => {
+  const parsed = createAdminSchema.safeParse(request.body);
+  if (!parsed.success) {
+    throw new AppError(422, "Enter a valid name, email, and strong password", "VALIDATION_ERROR");
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  if (await UserModel.exists({ email })) {
+    throw new AppError(409, "An account already uses this email", "EMAIL_IN_USE");
+  }
+
+  const user = await UserModel.create({
+    firstName: parsed.data.firstName,
+    lastName: parsed.data.lastName,
+    email,
+    passwordHash: await bcrypt.hash(parsed.data.password, env.BCRYPT_ROUNDS),
+    role: "admin",
+    status: "active",
+    emailVerifiedAt: new Date(),
+  });
+
+  try {
+    await WalletModel.create({
+      userId: user._id,
+      walletNumber: await allocateWalletNumber(),
+      currency: env.PAYSTACK_CURRENCY,
+    });
+    await AdminModel.create({
+      userId: user._id,
+      active: true,
+      permissions: [...ADMIN_PERMISSIONS],
+    });
+  } catch (error) {
+    await Promise.all([
+      WalletModel.deleteOne({ userId: user._id }),
+      AdminModel.deleteOne({ userId: user._id }),
+      UserModel.deleteOne({ _id: user._id }),
+    ]);
+    throw error;
+  }
+
+  logger.info(
+    { actorAdminId: request.admin?.adminId, createdAdminUserId: user._id.toString() },
+    "Administrator created from portal",
+  );
+  redirectWithMessage(response, "Administrator account created.");
+};
+
+export const blockUserFromAdmin = async (request: Request, response: Response): Promise<void> => {
+  const userId = parseUserId(request);
+  const user = await UserModel.findById(userId);
+
+  if (!user || user.status === "deleted") {
+    throw new AppError(404, "User was not found", "USER_NOT_FOUND");
+  }
+  if (user.role === "admin") {
+    throw new AppError(403, "Administrator accounts cannot be blocked from this portal", "ADMIN_BLOCK_FORBIDDEN");
+  }
+  if (user.status !== "active") {
+    throw new AppError(409, "Only active users can be blocked", "USER_NOT_ACTIVE");
+  }
+
+  user.status = "suspended";
+  user.tokenVersion += 1;
+  await Promise.all([
+    user.save(),
+    RefreshTokenModel.updateMany(
+      { userId: user._id, revokedAt: { $exists: false } },
+      { revokedAt: new Date() },
+    ),
+  ]);
+
+  logger.info(
+    { actorAdminId: request.admin?.adminId, targetUserId: user._id.toString() },
+    "User blocked from admin portal",
+  );
+  redirectWithMessage(response, "User blocked and active sessions revoked.");
+};
+
+export const unblockUserFromAdmin = async (request: Request, response: Response): Promise<void> => {
+  const userId = parseUserId(request);
+  const user = await UserModel.findById(userId);
+
+  if (!user || user.status === "deleted") {
+    throw new AppError(404, "User was not found", "USER_NOT_FOUND");
+  }
+  if (user.role === "admin") {
+    throw new AppError(403, "Administrator accounts cannot be changed from this portal", "ADMIN_STATUS_FORBIDDEN");
+  }
+  if (user.status !== "suspended") {
+    throw new AppError(409, "Only blocked users can be unblocked", "USER_NOT_BLOCKED");
+  }
+
+  user.status = "active";
+  user.tokenVersion += 1;
+  await user.save();
+
+  logger.info(
+    { actorAdminId: request.admin?.adminId, targetUserId: user._id.toString() },
+    "User unblocked from admin portal",
+  );
+  redirectWithMessage(response, "User unblocked. They can sign in again.");
 };
 
 export const approveEventFromAdmin = async (
@@ -237,7 +398,7 @@ export const approveEventFromAdmin = async (
   event.publishedAt = new Date();
   event.deactivationReason = undefined;
   await event.save();
-  response.redirect("/admin?message=" + encodeURIComponent("Event approved and published."));
+  redirectWithMessage(response, "Event approved and published.");
 };
 
 export const deactivateEventFromAdmin = async (
@@ -272,5 +433,5 @@ export const deactivateEventFromAdmin = async (
     throw new AppError(404, "Published event was not found", "EVENT_NOT_FOUND");
   }
 
-  response.redirect("/admin?message=" + encodeURIComponent("Event deactivated."));
+  redirectWithMessage(response, "Event deactivated.");
 };

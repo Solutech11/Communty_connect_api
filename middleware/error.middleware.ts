@@ -9,7 +9,6 @@ export const notFoundHandler: RequestHandler = (request, _response, next) => {
 };
 
 export const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
-  console.log(error)
   let normalized = error;
 
   if (error instanceof mongoose.Error.CastError) {

@@ -9,15 +9,24 @@ import { RedisStore } from "rate-limit-redis";
 import { env } from "../Config/env";
 import { redisClient, waitForRedisReady } from "../DB/redis";
 import { AppError } from "../utils/AppError";
+import { logger } from "../utils/logger.utils";
+
+export const isCorsOriginAllowed = (origin: string | undefined): boolean => {
+  // Development supports Expo/browser ports and LAN testing without repeated
+  // environment edits. Production remains an explicit allowlist.
+  return !origin || !env.isProduction || env.allowedOrigins.includes(origin);
+};
 
 const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
-    // Native mobile requests usually have no Origin header. Browser origins remain allowlisted.
-    if (!origin || env.allowedOrigins.includes(origin)) {
+    if (isCorsOriginAllowed(origin)) {
       callback(null, true);
       return;
     }
 
+    // Origins are safe operational metadata; log the rejected value so a new
+    // browser deployment can be explicitly added to FRONTEND_URLS.
+    logger.warn({ origin }, "Rejected disallowed CORS origin");
     callback(new AppError(403, "Origin is not allowed", "CORS_ORIGIN_DENIED"));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
