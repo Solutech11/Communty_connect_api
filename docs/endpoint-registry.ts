@@ -13,7 +13,7 @@ export interface EndpointDefinition {
 }
 
 export const apiEndpoints: EndpointDefinition[] = [
-  { method: "post", path: "/auth/register", tag: "Auth", summary: "Register an account", description: "Creates a pending member, wallet, and one-time email verification code.", auth: false, requestBody: true },
+  { method: "post", path: "/auth/register", tag: "Auth", summary: "Register an account", description: "Creates a pending member, wallet, and one-time email verification code. An optional valid GeoJSON user location is saved for nearby-event ranking.", auth: false, requestBody: true },
   { method: "post", path: "/auth/verify-email", tag: "Auth", summary: "Verify email", description: "Verifies the six-digit email code and creates an access/refresh token session.", auth: false, requestBody: true },
   { method: "post", path: "/auth/resend-verification", tag: "Auth", summary: "Resend verification code", description: "Issues a replacement verification code without revealing account existence.", auth: false, requestBody: true },
   { method: "post", path: "/auth/login", tag: "Auth", summary: "Sign in", description: "Authenticates an active verified user and creates a token session.", auth: false, requestBody: true },
@@ -28,6 +28,7 @@ export const apiEndpoints: EndpointDefinition[] = [
   { method: "post", path: "/users/me/push-tokens", tag: "Users", summary: "Register Expo push token", description: "Adds a validated Expo push token to the signed-in account.", auth: true, requestBody: true },
   { method: "delete", path: "/users/me/push-tokens", tag: "Users", summary: "Remove Expo push token", description: "Removes a device push token from the signed-in account.", auth: true, requestBody: true },
   { method: "delete", path: "/users/me", tag: "Users", summary: "Delete my account", description: "Requires password confirmation, anonymizes the account, and revokes sessions.", auth: true, requestBody: true },
+  { method: "post", path: "/users/{id}/reports", tag: "Reports", summary: "Report user", description: "Submits a confidential moderation report for an active user account.", auth: true, requestBody: true },
 
   { method: "get", path: "/events", tag: "Events", summary: "List events", description: "Lists upcoming published events and sorts nearest-first when coordinates or a saved user location are available.", auth: false },
   { method: "get", path: "/events/recommended", tag: "Events", summary: "Get personalized nearby events", description: "Uses geospatial distance, profile interests, paid-event history, popularity, and freshness to rank upcoming events.", auth: true },
@@ -42,8 +43,9 @@ export const apiEndpoints: EndpointDefinition[] = [
   { method: "post", path: "/events/{id}/ticket-types", tag: "Events", summary: "Add ticket type", description: "Adds one of up to ten ticket types to an owned draft.", auth: true, requestBody: true },
   { method: "patch", path: "/events/{id}/ticket-types/{ticketTypeId}", tag: "Events", summary: "Update ticket type", description: "Updates an unsold ticket type on an owned event.", auth: true, requestBody: true },
   { method: "delete", path: "/events/{id}/ticket-types/{ticketTypeId}", tag: "Events", summary: "Remove ticket type", description: "Deactivates an unsold ticket type on an owned event.", auth: true },
-  { method: "get", path: "/events/{id}/attendees", tag: "Events", summary: "List event attendees", description: "Returns paid ticket holders to the event owner.", auth: true },
+  { method: "get", path: "/events/{id}/attendees", tag: "Events", summary: "List event attendees", description: "Returns paid ticket holders with check-in status, timestamp, and aggregate ticket counts to the event owner.", auth: true },
   { method: "post", path: "/events/{id}/check-ins", tag: "Events", summary: "Check in a ticket", description: "Validates a QR token and atomically records first use for the event owner.", auth: true, requestBody: true },
+  { method: "post", path: "/events/{id}/reports", tag: "Reports", summary: "Report event", description: "Submits a confidential moderation report for a published event.", auth: true, requestBody: true },
 
   { method: "get", path: "/communities", tag: "Communities", summary: "List communities", description: "Lists searchable public communities with category and location filters.", auth: false },
   { method: "get", path: "/communities/{id}", tag: "Communities", summary: "Get community", description: "Returns public community details and moderators.", auth: false },
@@ -54,15 +56,22 @@ export const apiEndpoints: EndpointDefinition[] = [
   { method: "get", path: "/communities/membership-orders/{orderNumber}/verify", tag: "Communities", summary: "Verify premium membership", description: "Verifies the exact Paystack amount server-to-server before adding the member and settling net owner proceeds.", auth: true },
   { method: "delete", path: "/communities/{id}/members/me", tag: "Communities", summary: "Leave community", description: "Removes the signed-in member; owners must transfer ownership first.", auth: true },
   { method: "get", path: "/communities/{id}/members", tag: "Communities", summary: "List community members", description: "Returns safe member profile fields.", auth: true },
+  { method: "get", path: "/communities/{id}/posts", tag: "Communities", summary: "List community posts", description: "Returns paginated member-room posts with safe author profiles.", auth: true },
+  { method: "post", path: "/communities/{id}/posts", tag: "Communities", summary: "Create community post", description: "Allows a community member to publish a validated room post.", auth: true, requestBody: true },
+  { method: "get", path: "/communities/{id}/announcements", tag: "Communities", summary: "List community announcements", description: "Returns paginated member-room announcements with author profiles.", auth: true },
+  { method: "post", path: "/communities/{id}/announcements", tag: "Communities", summary: "Create community announcement", description: "Allows only the owner or a moderator to publish an announcement.", auth: true, requestBody: true },
+  { method: "get", path: "/communities/{id}/messages", tag: "Communities", summary: "List community messages", description: "Returns paginated member-room message history with author profiles.", auth: true },
+  { method: "post", path: "/communities/{id}/messages", tag: "Communities", summary: "Send community message", description: "Creates an idempotent member-room message and emits it to the community socket room.", auth: true, requestBody: true },
+  { method: "post", path: "/communities/{id}/reports", tag: "Reports", summary: "Report community", description: "Submits a confidential moderation report for an accessible community.", auth: true, requestBody: true },
 
-  { method: "get", path: "/friends", tag: "Friends", summary: "List friends", description: "Lists accepted friendships for the signed-in user.", auth: true },
-  { method: "get", path: "/friends/requests", tag: "Friends", summary: "List friend requests", description: "Lists pending inbound requests.", auth: true },
+  { method: "get", path: "/friends", tag: "Friends", summary: "List friends", description: "Lists accepted friendships with stable user IDs and safe requester/addressee profiles.", auth: true },
+  { method: "get", path: "/friends/requests", tag: "Friends", summary: "List friend requests", description: "Lists pending inbound requests with stable user IDs and safe requester/addressee profiles.", auth: true },
   { method: "get", path: "/friends/suggestions", tag: "Friends", summary: "Get friend suggestions", description: "Returns active users excluding the current social graph.", auth: true },
   { method: "post", path: "/friends/requests/{userId}", tag: "Friends", summary: "Send friend request", description: "Creates one unique pending relationship between two users.", auth: true },
   { method: "patch", path: "/friends/requests/{id}", tag: "Friends", summary: "Respond to friend request", description: "Accepts or declines an inbound pending request.", auth: true, requestBody: true },
   { method: "delete", path: "/friends/{id}", tag: "Friends", summary: "Remove friend", description: "Deletes a relationship only when the signed-in user is a participant.", auth: true },
 
-  { method: "get", path: "/chat/conversations", tag: "Chat", summary: "List conversations", description: "Lists conversations in which the signed-in user participates.", auth: true },
+  { method: "get", path: "/chat/conversations", tag: "Chat", summary: "List conversations", description: "Lists conversations with stable participant IDs, safe participant profiles, unread count, and last-message preview.", auth: true },
   { method: "post", path: "/chat/conversations", tag: "Chat", summary: "Create conversation", description: "Creates a direct, group, or support conversation with validated active members.", auth: true, requestBody: true },
   { method: "get", path: "/chat/conversations/{id}/messages", tag: "Chat", summary: "List messages", description: "Returns cursor-paginated messages after a participant ownership check.", auth: true },
   { method: "post", path: "/chat/conversations/{id}/messages", tag: "Chat", summary: "Send message", description: "Creates an idempotent client message and emits it over Socket.IO.", auth: true, requestBody: true },

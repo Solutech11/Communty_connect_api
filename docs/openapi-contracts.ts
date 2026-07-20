@@ -1,4 +1,4 @@
-﻿export type OpenApiSchema = Record<string, unknown>;
+export type OpenApiSchema = Record<string, unknown>;
 
 export interface RequestBodyContract {
   contentType: "application/json" | "multipart/form-data";
@@ -36,7 +36,16 @@ const user = {
   state: "Lagos",
   lga: "Ikeja",
   interests: ["technology", "music"],
+  avatarUrl: "https://res.cloudinary.com/example/avatar.webp",
   createdAt,
+};
+
+const secondUser = {
+  ...user,
+  _id: secondId,
+  firstName: "Chidi",
+  lastName: "Eze",
+  email: "chidi@example.com",
 };
 
 const session = {
@@ -51,6 +60,7 @@ const event = {
   title: "Lagos Tech Meetup 2026",
   slug: "lagos-tech-meetup-2026-a1b2c3d4",
   description: "An evening of practical talks, networking, and community building.",
+  coverImageUrl: "https://res.cloudinary.com/example/event.webp",
   activityType: "Technology",
   setting: "indoor",
   country: "Nigeria",
@@ -98,6 +108,7 @@ const community = {
   name: "Lagos Product Builders",
   slug: "lagos-product-builders-a1b2c3",
   description: "A community for product designers, engineers, and founders in Lagos.",
+  imageUrl: "https://res.cloudinary.com/example/community.webp",
   category: "Technology",
   state: "Lagos",
   lga: "Ikeja",
@@ -134,13 +145,23 @@ const conversation = {
   type: "direct",
   title: null,
   participantIds: [id, secondId],
+  participants: [user, secondUser],
   lastMessageAt: createdAt,
+  lastMessagePreview: {
+    _id: secondId,
+    senderId: secondId,
+    type: "text",
+    text: "Hello, are you attending the meetup?",
+    createdAt,
+  },
+  unreadCount: 1,
 };
 
 const message = {
   _id: id,
   conversationId: secondId,
   senderId: id,
+  sender: user,
   clientMessageId: "mobile-1784370000000",
   type: "text",
   text: "Hello, are you attending the meetup?",
@@ -156,6 +177,16 @@ const notification = {
   createdAt,
 };
 
+const disputeMessage = {
+  _id: secondId,
+  authorId: user,
+  message: "The ticket is still unavailable in my account.",
+  attachments: ["https://res.cloudinary.com/example/receipt.webp"],
+  internal: false,
+  createdAt,
+  updatedAt: createdAt,
+};
+
 const dispute = {
   _id: id,
   userId: secondId,
@@ -163,7 +194,7 @@ const dispute = {
   subject: "Ticket payment needs review",
   description: "My payment succeeded but the ticket was not immediately visible.",
   status: "open",
-  messages: [],
+  messages: [disputeMessage],
   createdAt,
 };
 
@@ -171,7 +202,41 @@ const friendship = {
   _id: id,
   requesterId: secondId,
   addresseeId: id,
+  requester: secondUser,
+  addressee: user,
   status: "pending",
+  createdAt,
+};
+
+const communityPost = {
+  _id: id,
+  communityId: secondId,
+  authorId: user,
+  kind: "post",
+  text: "Welcome to our weekly community update.",
+  imageUrl: "https://res.cloudinary.com/example/community-post.webp",
+  createdAt,
+};
+
+const communityAnnouncement = {
+  ...communityPost,
+  kind: "announcement",
+  text: "Saturday's meetup starts at 10:00 AM.",
+};
+
+const communityMessage = {
+  ...communityPost,
+  kind: "message",
+  text: "Is anyone attending the meetup?",
+  clientMessageId: "community-mobile-1784370000000",
+};
+
+const report = {
+  _id: id,
+  targetType: "event",
+  targetId: secondId,
+  reason: "unsafe",
+  status: "open",
   createdAt,
 };
 
@@ -257,7 +322,7 @@ const paginationQuery = [
 ];
 
 export const requestBodyContracts: Record<string, RequestBodyContract> = {
-  "POST /auth/register": jsonBody({ firstName: "Ada", lastName: "Okafor", email: "ada@example.com", password: "StrongPass1!", phone: "+2348012345678" }, ["firstName", "lastName", "email", "password"]),
+  "POST /auth/register": jsonBody({ firstName: "Ada", lastName: "Okafor", email: "ada@example.com", password: "StrongPass1!", phone: "+2348012345678", location: { type: "Point", coordinates: [3.3792, 6.5244] } }, ["firstName", "lastName", "email", "password"], "Location is optional. When supplied, send a complete GeoJSON Point with coordinates in [longitude, latitude] order."),
   "POST /auth/verify-email": jsonBody({ email: "ada@example.com", otp: "123456" }, ["email", "otp"]),
   "POST /auth/resend-verification": jsonBody({ email: "ada@example.com" }, ["email"]),
   "POST /auth/login": jsonBody({ email: "ada@example.com", password: "StrongPass1!" }, ["email", "password"]),
@@ -281,6 +346,13 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
 
   "POST /communities": jsonBody({ name: "Lagos Product Builders", description: "A community for product designers, engineers, and founders in Lagos.", imageUrl: "https://res.cloudinary.com/example/community.webp", category: "Technology", state: "Lagos", lga: "Ikeja", visibility: "public", membershipType: "premium", membershipPriceKobo: 200000 }, ["name", "description", "category"]),
   "PATCH /communities/{id}": jsonBody({ description: "Updated community description for product builders across Lagos.", membershipType: "premium", membershipPriceKobo: 250000 }, [], "Send at least one community field. Premium communities require a positive membershipPriceKobo."),
+  "POST /communities/{id}/posts": jsonBody({ text: "Welcome to our weekly community update.", imageUrl: "https://res.cloudinary.com/example/community-post.webp" }, ["text"]),
+  "POST /communities/{id}/announcements": jsonBody({ text: "Saturday's meetup starts at 10:00 AM.", imageUrl: "https://res.cloudinary.com/example/announcement.webp" }, ["text"]),
+  "POST /communities/{id}/messages": jsonBody({ clientMessageId: "community-mobile-1784370000000", text: "Is anyone attending the meetup?", imageUrl: "https://res.cloudinary.com/example/community-chat.webp" }, ["clientMessageId", "text"]),
+  "POST /communities/{id}/reports": jsonBody({ reason: "unsafe", details: "This community is promoting an unsafe gathering location." }, ["reason"]),
+
+  "POST /events/{id}/reports": jsonBody({ reason: "unsafe", details: "The event venue details appear unsafe and misleading." }, ["reason"]),
+  "POST /users/{id}/reports": jsonBody({ reason: "harassment", details: "This account repeatedly sent threatening messages." }, ["reason"]),
 
   "PATCH /friends/requests/{id}": jsonBody({ action: "accept" }, ["action"]),
   "POST /chat/conversations": jsonBody({ type: "direct", title: "Event planning", participantIds: [secondId] }, ["type", "participantIds"]),
@@ -325,6 +397,9 @@ export const queryParameterContracts: Record<string, QueryParameterContract[]> =
     query("radiusKm", "Maximum radius in kilometres.", { type: "number", exclusiveMinimum: 0, maximum: 500, default: 100 }, 50),
     query("limit", "Maximum recommendations.", { type: "integer", minimum: 1, maximum: 50, default: 20 }, 20),
   ],
+  "GET /communities/{id}/posts": paginationQuery.slice(0, 2),
+  "GET /communities/{id}/announcements": paginationQuery.slice(0, 2),
+  "GET /communities/{id}/messages": paginationQuery.slice(0, 2),
   "GET /communities": [
     ...paginationQuery,
     query("category", "Filter by category.", { type: "string", maxLength: 60 }, "Technology"),
@@ -365,6 +440,7 @@ export const successContracts: Record<string, SuccessContract> = {
   "POST /users/me/push-tokens": ok("Push token registered"),
   "DELETE /users/me/push-tokens": ok("Push token removed"),
   "DELETE /users/me": ok("Account deleted"),
+  "POST /users/{id}/reports": ok("Report submitted", { report: { ...report, targetType: "user" } }, 201),
 
   "GET /events": ok("Events retrieved", { events: [event], sort: "soonest", pagination: { page: 1, limit: 20, total: 1 } }),
   "GET /events/recommended": ok("Personalized nearby events retrieved", { events: [{ ...event, distanceKm: 4.8, recommendationScore: 0.91 }], locationUsed: { latitude: 6.5244, longitude: 3.3792 } }),
@@ -379,8 +455,9 @@ export const successContracts: Record<string, SuccessContract> = {
   "POST /events/{id}/ticket-types": ok("Ticket type created", { ticketType }, 201),
   "PATCH /events/{id}/ticket-types/{ticketTypeId}": ok("Ticket type updated", { ticketType: { ...ticketType, title: "Early Bird" } }),
   "DELETE /events/{id}/ticket-types/{ticketTypeId}": ok("Ticket type removed"),
-  "GET /events/{id}/attendees": ok("Attendees retrieved", { attendees: [{ ...order, buyerId: user }] }),
+  "GET /events/{id}/attendees": ok("Attendees retrieved", { attendees: [{ ...order, buyerId: user, checkedIn: true, checkedInAt: createdAt }], summary: { orders: 1, totalTickets: 1, checkedInTickets: 1, pendingTickets: 0 } }),
   "POST /events/{id}/check-ins": ok("Ticket checked in", { order: { ...order, checkedInAt: createdAt } }),
+  "POST /events/{id}/reports": ok("Report submitted", { report }, 201),
 
   "GET /communities": ok("Communities retrieved", { communities: [community], pagination: { page: 1, limit: 20, total: 1 } }),
   "GET /communities/{id}": ok("Community retrieved", { community }),
@@ -391,6 +468,13 @@ export const successContracts: Record<string, SuccessContract> = {
   "GET /communities/membership-orders/{orderNumber}/verify": ok("Community membership verified", { order: { orderNumber: "CCM-1784370000000-A1B2C3D4", communityId: community, status: "paid", paidAt: createdAt } }),
   "DELETE /communities/{id}/members/me": ok("Community left"),
   "GET /communities/{id}/members": ok("Community members retrieved", { members: [user] }),
+  "GET /communities/{id}/posts": ok("Community posts retrieved", { posts: [communityPost], pagination: { page: 1, limit: 20, total: 1 } }),
+  "POST /communities/{id}/posts": ok("Community post created", { post: communityPost }, 201),
+  "GET /communities/{id}/announcements": ok("Community announcements retrieved", { announcements: [communityAnnouncement], pagination: { page: 1, limit: 20, total: 1 } }),
+  "POST /communities/{id}/announcements": ok("Community announcement created", { announcement: communityAnnouncement }, 201),
+  "GET /communities/{id}/messages": ok("Community messages retrieved", { messages: [communityMessage], pagination: { page: 1, limit: 20, total: 1 } }),
+  "POST /communities/{id}/messages": ok("Community message sent", { message: communityMessage }, 201),
+  "POST /communities/{id}/reports": ok("Report submitted", { report: { ...report, targetType: "community" } }, 201),
 
   "GET /friends": ok("Friends retrieved", { friendships: [{ ...friendship, status: "accepted" }] }),
   "GET /friends/requests": ok("Friend requests retrieved", { requests: [friendship] }),
@@ -423,7 +507,7 @@ export const successContracts: Record<string, SuccessContract> = {
   "POST /disputes": ok("Dispute submitted", { dispute }, 201),
   "GET /disputes": ok("Disputes retrieved", { disputes: [dispute] }),
   "GET /disputes/{id}": ok("Dispute retrieved", { dispute }),
-  "POST /disputes/{id}/messages": ok("Dispute reply added", { dispute: { ...dispute, messages: [{ senderId: id, message: "The ticket is still unavailable in my account.", createdAt }] } }, 201),
+  "POST /disputes/{id}/messages": ok("Dispute reply added", { dispute: { ...dispute, messages: [disputeMessage] } }, 201),
   "PATCH /disputes/{id}/status": ok("Dispute status updated", { dispute: { ...dispute, status: "resolved", resolution: "Payment reconciled and the ticket was issued." } }),
 
   "GET /wallet": ok("Wallet retrieved", { wallet }),

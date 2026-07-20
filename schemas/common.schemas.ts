@@ -14,7 +14,7 @@ export const paginationSchema = z.object({
 
 export const passwordSchema = z
   .string()
-  .min(10)
+  .min(6, "Password must be at least 6 characters long")
   .max(128)
   .regex(/[a-z]/, "Password must contain a lowercase letter")
   .regex(/[A-Z]/, "Password must contain an uppercase letter")

@@ -1,4 +1,4 @@
-﻿import { randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
 import { getPersonalizedEventRecommendations } from "../Community_AI/EventRecommendation.algorithm";
 import { UserModel } from "../models/Auth/User.model";
@@ -295,35 +295,70 @@ export const listCreatedEvents = async (request: Request, response: Response): P
 };
 
 export const listAttendees = async (request: Request, response: Response): Promise<Response> => {
-  const event = await requireOwnedEvent((request.params.id as string), request.auth?.id as string);
+  const event = await requireOwnedEvent(request.params.id as string, request.auth?.id as string);
   const orders = await TicketOrderModel.find({ eventId: event._id, status: "paid" })
     .populate("buyerId", "firstName lastName email avatarUrl")
-    .populate("ticketTypeId", "title");
-  return sendSuccess(response, 200, "Attendees retrieved", { attendees: orders });
-};
+    .populate("ticketTypeId", "title")
+    .sort({ createdAt: -1 });
+  const attendees = orders.map((order) => ({
+    ...order.toObject(),
+    checkedIn: Boolean(order.checkedInAt),
+    checkedInAt: order.checkedInAt || null,
+  }));
+  const totalTickets = orders.reduce((sum, order) => sum + order.quantity, 0);
+  const checkedInTickets = orders.reduce(
+    (sum, order) => sum + (order.checkedInAt ? order.quantity : 0),
+    0,
+  );
 
+  return sendSuccess(response, 200, "Attendees retrieved", {
+    attendees,
+    summary: {
+      orders: orders.length,
+      totalTickets,
+      checkedInTickets,
+      pendingTickets: totalTickets - checkedInTickets,
+    },
+  });
+};
 export const checkInTicket = async (request: Request, response: Response): Promise<Response> => {
-  const event = await requireOwnedEvent((request.params.id as string), request.auth?.id as string);
+  const event = await requireOwnedEvent(request.params.id as string, request.auth?.id as string);
   const qrTokenHash = sha256(request.body.qrToken);
-  const order = await TicketOrderModel.findOne({
+  const checkedInAt = new Date();
+  const order = await TicketOrderModel.findOneAndUpdate(
+    {
+      eventId: event._id,
+      qrTokenHash,
+      status: "paid",
+      checkedInAt: { $exists: false },
+    },
+    {
+      $set: {
+        checkedInAt,
+        checkedInBy: request.auth?.id,
+      },
+    },
+    { new: true },
+  ).select("+qrTokenHash");
+
+  if (order) {
+    order.set("qrTokenHash", undefined);
+    return sendSuccess(response, 200, "Ticket checked in", { order });
+  }
+
+  const usedOrder = await TicketOrderModel.findOne({
     eventId: event._id,
     qrTokenHash,
     status: "paid",
-  }).select("+qrTokenHash");
+  })
+    .select("+qrTokenHash checkedInAt")
+    .lean();
 
-  if (!order) {
-    throw new AppError(404, "Ticket is invalid", "INVALID_TICKET");
-  }
-
-  if (order.checkedInAt) {
+  if (usedOrder?.checkedInAt) {
     throw new AppError(409, "Ticket has already been checked in", "TICKET_ALREADY_USED", {
-      checkedInAt: order.checkedInAt,
+      checkedInAt: usedOrder.checkedInAt,
     });
   }
 
-  order.checkedInAt = new Date();
-  order.checkedInBy = request.auth?.id as never;
-  await order.save();
-  return sendSuccess(response, 200, "Ticket checked in", { order });
+  throw new AppError(404, "Ticket is invalid", "INVALID_TICKET");
 };
-

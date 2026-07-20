@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import { z } from "zod";
 import {
   changePassword,
@@ -8,9 +8,11 @@ import {
   removePushToken,
   updateProfile,
 } from "../../Controller/user.controller";
+import { createTargetReport } from "../../Controller/report.controller";
 import { authenticate } from "../../middleware/auth.middleware";
 import { validate } from "../../middleware/validate.middleware";
-import { passwordSchema } from "../../schemas/common.schemas";
+import { idParamsSchema, passwordSchema } from "../../schemas/common.schemas";
+import { reportBodySchema } from "../../schemas/report.schemas";
 import { asyncHandler } from "../../utils/asyncHandler.utils";
 
 const router = Router();
@@ -26,6 +28,11 @@ const geoPoint = z.object({
 
 router.use(authenticate);
 router.get("/me", asyncHandler(getProfile));
+router.post(
+  "/:id/reports",
+  validate({ params: idParamsSchema, body: reportBodySchema }),
+  asyncHandler(createTargetReport("user")),
+);
 router.patch(
   "/me",
   validate({

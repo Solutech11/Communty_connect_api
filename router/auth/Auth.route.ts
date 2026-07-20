@@ -18,6 +18,15 @@ import { passwordSchema } from "../../schemas/common.schemas";
 const router = Router();
 const email = z.string().trim().email().max(254);
 const otp = z.string().regex(/^\d{6}$/);
+// GeoJSON requires longitude before latitude. Requiring both values prevents
+// persisting malformed points that MongoDB's 2dsphere index would reject.
+const geoPoint = z.object({
+  type: z.literal("Point").default("Point"),
+  coordinates: z.tuple([
+    z.number().min(-180).max(180),
+    z.number().min(-90).max(90),
+  ]),
+}).strict();
 
 router.post(
   "/register",
@@ -28,6 +37,7 @@ router.post(
       email,
       password: passwordSchema,
       phone: z.string().trim().min(7).max(24).optional(),
+      location: geoPoint.optional(),
     }).strict(),
   }),
   asyncHandler(register),

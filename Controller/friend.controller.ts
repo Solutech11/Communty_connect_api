@@ -1,4 +1,5 @@
-﻿import type { Request, Response } from "express";
+import type { Request, Response } from "express";
+import type { Types } from "mongoose";
 import { FriendshipModel } from "../models/Social/Friendship.model";
 import { UserModel } from "../models/Auth/User.model";
 import { AppError } from "../utils/AppError";
@@ -6,23 +7,79 @@ import { sendSuccess } from "../utils/response.utils";
 import { createNotification } from "../utils/notificationService.utils";
 
 const pairKeyFor = (left: string, right: string): string => [left, right].sort().join(":");
+const profileFields = "firstName lastName avatarUrl state lga interests";
+
+interface PopulatedProfile {
+  _id: Types.ObjectId;
+  firstName: string;
+  lastName: string;
+  avatarUrl?: string;
+  state?: string;
+  lga?: string;
+  interests?: string[];
+}
+
+interface PopulatedFriendship {
+  _id: Types.ObjectId;
+  requesterId: PopulatedProfile;
+  addresseeId: PopulatedProfile;
+  pairKey: string;
+  status: string;
+  respondedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const friendshipDto = (record: PopulatedFriendship) => ({
+  _id: record._id.toString(),
+  requesterId: record.requesterId._id.toString(),
+  addresseeId: record.addresseeId._id.toString(),
+  requester: record.requesterId,
+  addressee: record.addresseeId,
+  status: record.status,
+  respondedAt: record.respondedAt,
+  createdAt: record.createdAt,
+  updatedAt: record.updatedAt,
+});
+
+const populateFriendship = async (id: Types.ObjectId) => {
+  const record = await FriendshipModel.findById(id)
+    .populate("requesterId", profileFields)
+    .populate("addresseeId", profileFields);
+
+  if (!record) {
+    throw new AppError(404, "Friendship was not found", "FRIENDSHIP_NOT_FOUND");
+  }
+
+  return friendshipDto(record.toObject() as unknown as PopulatedFriendship);
+};
 
 export const listFriends = async (request: Request, response: Response): Promise<Response> => {
   const records = await FriendshipModel.find({
     status: "accepted",
     $or: [{ requesterId: request.auth?.id }, { addresseeId: request.auth?.id }],
   })
-    .populate("requesterId", "firstName lastName avatarUrl state lga")
-    .populate("addresseeId", "firstName lastName avatarUrl state lga")
+    .populate("requesterId", profileFields)
+    .populate("addresseeId", profileFields)
     .sort({ updatedAt: -1 });
-  return sendSuccess(response, 200, "Friends retrieved", { friendships: records });
+  return sendSuccess(response, 200, "Friends retrieved", {
+    friendships: records.map((record) =>
+      friendshipDto(record.toObject() as unknown as PopulatedFriendship)),
+  });
 };
 
 export const listFriendRequests = async (request: Request, response: Response): Promise<Response> => {
-  const requests = await FriendshipModel.find({ addresseeId: request.auth?.id, status: "pending" })
-    .populate("requesterId", "firstName lastName avatarUrl state lga")
+  const records = await FriendshipModel.find({
+    addresseeId: request.auth?.id,
+    status: "pending",
+  })
+    .populate("requesterId", profileFields)
+    .populate("addresseeId", profileFields)
     .sort({ createdAt: -1 });
-  return sendSuccess(response, 200, "Friend requests retrieved", { requests });
+  return sendSuccess(response, 200, "Friend requests retrieved", {
+    requests: records.map((record) =>
+      friendshipDto(record.toObject() as unknown as PopulatedFriendship)),
+  });
 };
 
 export const suggestions = async (request: Request, response: Response): Promise<Response> => {
@@ -46,7 +103,7 @@ export const suggestions = async (request: Request, response: Response): Promise
 };
 
 export const sendFriendRequest = async (request: Request, response: Response): Promise<Response> => {
-  const targetId = (request.params.userId as string);
+  const targetId = request.params.userId as string;
 
   if (targetId === request.auth?.id) {
     throw new AppError(400, "You cannot send a friend request to yourself", "INVALID_FRIEND_REQUEST");
@@ -54,6 +111,10 @@ export const sendFriendRequest = async (request: Request, response: Response): P
 
   if (!(await UserModel.exists({ _id: targetId, status: "active" }))) {
     throw new AppError(404, "User was not found", "USER_NOT_FOUND");
+  }
+
+  if (await FriendshipModel.exists({ pairKey: pairKeyFor(request.auth?.id as string, targetId) })) {
+    throw new AppError(409, "A friendship or request already exists", "FRIENDSHIP_ALREADY_EXISTS");
   }
 
   const friendship = await FriendshipModel.create({
@@ -69,7 +130,9 @@ export const sendFriendRequest = async (request: Request, response: Response): P
     data: { friendshipId: friendship._id.toString(), route: "Friends" },
     dedupeKey: `friend-request:${friendship._id.toString()}`,
   });
-  return sendSuccess(response, 201, "Friend request sent", { friendship });
+  return sendSuccess(response, 201, "Friend request sent", {
+    friendship: await populateFriendship(friendship._id),
+  });
 };
 
 export const respondToFriendRequest = async (
@@ -78,7 +141,7 @@ export const respondToFriendRequest = async (
 ): Promise<Response> => {
   const status = request.body.action === "accept" ? "accepted" : "declined";
   const friendship = await FriendshipModel.findOneAndUpdate(
-    { _id: (request.params.id as string), addresseeId: request.auth?.id, status: "pending" },
+    { _id: request.params.id as string, addresseeId: request.auth?.id, status: "pending" },
     { status, respondedAt: new Date() },
     { new: true },
   );
@@ -98,12 +161,14 @@ export const respondToFriendRequest = async (
     });
   }
 
-  return sendSuccess(response, 200, `Friend request ${status}`, { friendship });
+  return sendSuccess(response, 200, `Friend request ${status}`, {
+    friendship: await populateFriendship(friendship._id),
+  });
 };
 
 export const removeFriend = async (request: Request, response: Response): Promise<Response> => {
   const result = await FriendshipModel.deleteOne({
-    _id: (request.params.id as string),
+    _id: request.params.id as string,
     $or: [{ requesterId: request.auth?.id }, { addresseeId: request.auth?.id }],
   });
 
@@ -113,4 +178,3 @@ export const removeFriend = async (request: Request, response: Response): Promis
 
   return sendSuccess(response, 200, "Friend removed");
 };
-

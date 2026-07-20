@@ -3,11 +3,13 @@ import { once } from "node:events";
 
 const testFiles = [
   "tests/admin-views.test.ts",
+  "tests/api-gap-contracts.test.ts",
   "tests/charges.test.ts",
   "tests/crypto.test.ts",
   "tests/docs.test.ts",
   "tests/recommendation.test.ts",
   "tests/security.test.ts",
+  "tests/location.test.ts",
 ];
 
 const runTestFile = async (testFile: string): Promise<void> => {

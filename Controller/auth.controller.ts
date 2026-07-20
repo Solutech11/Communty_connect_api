@@ -76,7 +76,7 @@ const issueVerificationOtp = async (user: {
 };
 
 export const register = async (request: Request, response: Response): Promise<Response> => {
-  const { firstName, lastName, email, password, phone } = request.body;
+  const { firstName, lastName, email, password, phone, location } = request.body;
   const normalizedEmail = email.toLowerCase();
 
   if (await UserModel.exists({ email: normalizedEmail })) {
@@ -92,6 +92,7 @@ export const register = async (request: Request, response: Response): Promise<Re
     phone,
     passwordHash,
     role: bootstrapAdmin ? "admin" : "member",
+    ...(location ? { location } : {}),
   });
 
   try {

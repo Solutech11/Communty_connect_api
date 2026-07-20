@@ -25,6 +25,14 @@ export interface User {
   updatedAt: Date;
 }
 
+const geoPointSchema = new Schema<User["location"]>(
+  {
+    type: { type: String, enum: ["Point"], required: true },
+    coordinates: { type: [Number], required: true },
+  },
+  { _id: false, id: false },
+);
+
 const userSchema = new Schema<User>(
   {
     firstName: { type: String, required: true, trim: true, maxlength: 60 },
@@ -45,10 +53,12 @@ const userSchema = new Schema<User>(
     country: { type: String, default: "Nigeria" },
     state: { type: String },
     lga: { type: String },
+    // Do not default a partial GeoJSON object. A 2dsphere index rejects a
+    // document containing `{ type: "Point" }` without numeric coordinates.
     // GeoJSON Point coordinates are stored as [longitude, latitude].
     location: {
-      type: { type: String, enum: ["Point"], default: "Point" },
-      coordinates: { type: [Number], default: undefined },
+      type: geoPointSchema,
+      default: undefined,
     },
     interests: [{ type: String, trim: true, maxlength: 40 }],
     expoPushTokens: [{ type: String, select: false }],

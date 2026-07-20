@@ -61,6 +61,19 @@ yarn start        # start compiled build
 - Every Swagger operation includes concrete body/query/header schemas, request examples, success examples, and reusable error examples.
 - Process health: `GET /health`
 
+## Seed an Admin Account
+
+Use environment variables so the password is never committed to source control:
+
+```powershell
+$env:ADMIN_EMAIL = "admin@admin.com"
+$env:ADMIN_PASSWORD = "choose-a-strong-password"
+yarn seed:admin
+Remove-Item Env:ADMIN_PASSWORD
+```
+
+The script creates or updates the account as an active, verified admin, revokes existing refresh sessions when updating it, and creates a wallet when one is missing.
+
 ## Complete Endpoint Catalog
 
 Every route below is also registered in `docs/endpoint-registry.ts` and rendered into Swagger. `Auth` means a short-lived access token is required. Financial write routes additionally require an idempotency key.
@@ -69,7 +82,7 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
-| POST | `/auth/register` | No | Create pending account, wallet, and email OTP |
+| POST | `/auth/register` | No | Create pending account, wallet, email OTP, and optionally save a GeoJSON user location |
 | POST | `/auth/verify-email` | No | Verify OTP and create access/refresh session |
 | POST | `/auth/resend-verification` | No | Replace email verification OTP |
 | POST | `/auth/login` | No | Sign in verified active user |
@@ -88,6 +101,7 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | POST | `/users/me/push-tokens` | Yes | Register Expo device token |
 | DELETE | `/users/me/push-tokens` | Yes | Remove Expo device token |
 | DELETE | `/users/me` | Yes | Confirm password and anonymize account |
+| POST | `/users/{id}/reports` | Yes | Report an active user account for moderation |
 
 ### Events and Tickets
 
@@ -106,8 +120,9 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | POST | `/events/{id}/ticket-types` | Yes | Add ticket type (maximum 10) |
 | PATCH | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Update unsold ticket type |
 | DELETE | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Deactivate unsold ticket type |
-| GET | `/events/{id}/attendees` | Yes | Owner attendee management list |
+| GET | `/events/{id}/attendees` | Yes | Owner attendee list with check-in flags, timestamps, and count summary |
 | POST | `/events/{id}/check-ins` | Yes | Owner QR validation and one-time check-in |
+| POST | `/events/{id}/reports` | Yes | Report a published event for moderation |
 | GET | `/tickets` | Yes | List my ticket orders |
 | GET | `/tickets/{orderNumber}` | Yes | Get owned paid ticket and QR token |
 | GET | `/tickets/{orderNumber}/verify` | Yes | Verify exact Paystack payment and issue ticket |
@@ -125,8 +140,15 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | GET | `/communities/membership-orders/{orderNumber}/verify` | Yes | Verify payment and activate premium membership |
 | DELETE | `/communities/{id}/members/me` | Yes | Leave community (not owner) |
 | GET | `/communities/{id}/members` | Yes | List safe member profiles |
-| GET | `/friends` | Yes | List accepted friendships |
-| GET | `/friends/requests` | Yes | List inbound pending requests |
+| GET | `/communities/{id}/posts` | Yes | List paginated room posts with author profiles |
+| POST | `/communities/{id}/posts` | Yes | Publish a member room post |
+| GET | `/communities/{id}/announcements` | Yes | List paginated room announcements |
+| POST | `/communities/{id}/announcements` | Owner/mod | Publish a room announcement |
+| GET | `/communities/{id}/messages` | Yes | List paginated room message history |
+| POST | `/communities/{id}/messages` | Yes | Send idempotent room message |
+| POST | `/communities/{id}/reports` | Yes | Report an accessible community for moderation |
+| GET | `/friends` | Yes | List accepted friendships with safe requester/addressee profiles |
+| GET | `/friends/requests` | Yes | List inbound requests with safe requester/addressee profiles |
 | GET | `/friends/suggestions` | Yes | List users outside current graph |
 | POST | `/friends/requests/{userId}` | Yes | Send unique request |
 | PATCH | `/friends/requests/{id}` | Yes | Accept or decline inbound request |
@@ -136,7 +158,7 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
-| GET | `/chat/conversations` | Yes | List participating conversations |
+| GET | `/chat/conversations` | Yes | List participant profiles, unread counts, and last-message previews |
 | POST | `/chat/conversations` | Yes | Create direct/group/support conversation |
 | GET | `/chat/conversations/{id}/messages` | Yes | Cursor-paginated participant messages |
 | POST | `/chat/conversations/{id}/messages` | Yes | Send idempotent client message and emit socket event |
@@ -218,7 +240,7 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 
 ## Event Recommendation Algorithm
 
-- Save a user location with `PATCH /users/me` using GeoJSON coordinates in `[longitude, latitude]` order.
+- `POST /auth/register` and `PATCH /users/me` accept an optional GeoJSON `location` using coordinates in `[longitude, latitude]` order. Omit `location` entirely when it is unavailable; never send a partial point.
 - `GET /events` sorts by MongoDB geospatial distance whenever coordinates are provided or the authenticated user has a saved location.
 - `GET /events/recommended` combines distance, profile interests, paid ticket history, local area, popularity, and start-date freshness.
 - Distance has the highest weight, so personalization cannot bury genuinely nearby events. The response includes score, distance, and human-readable reasons.

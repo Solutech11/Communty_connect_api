@@ -25,7 +25,7 @@ router.post(
 );
 router.patch(
   "/requests/:id",
-  validate({ params: idParamsSchema, body: z.object({ action: z.enum(["accept", "decline"]) }).strict() }),
+  validate({ params: idParamsSchema, body: z.object({ action: z.enum(["accept", "decline", "reject"]) }).strict() }),
   asyncHandler(respondToFriendRequest),
 );
 router.delete("/:id", validate({ params: idParamsSchema }), asyncHandler(removeFriend));

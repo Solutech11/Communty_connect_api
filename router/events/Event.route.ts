@@ -16,11 +16,13 @@ import {
   updateEvent,
   updateTicketType,
 } from "../../Controller/event.controller";
+import { createTargetReport } from "../../Controller/report.controller";
 import { createTicketOrder } from "../../Controller/ticket.controller";
 import { authenticate, optionalAuthenticate } from "../../middleware/auth.middleware";
 import { requireIdempotencyKey } from "../../middleware/idempotency.middleware";
 import { validate } from "../../middleware/validate.middleware";
 import { idParamsSchema, objectIdSchema, paginationSchema } from "../../schemas/common.schemas";
+import { reportBodySchema } from "../../schemas/report.schemas";
 import { asyncHandler } from "../../utils/asyncHandler.utils";
 
 const router = Router();
@@ -156,6 +158,12 @@ router.delete(
   authenticate,
   validate({ params: eventTicketParams }),
   asyncHandler(removeTicketType),
+);
+router.post(
+  "/:id/reports",
+  authenticate,
+  validate({ params: idParamsSchema, body: reportBodySchema }),
+  asyncHandler(createTargetReport("event")),
 );
 router.get("/:id/attendees", authenticate, validate({ params: idParamsSchema }), asyncHandler(listAttendees));
 router.post(
