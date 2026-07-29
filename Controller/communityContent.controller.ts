@@ -1,7 +1,13 @@
-import type { Request, Response } from "express";
-import { CommunityModel } from "../models/Community/Community.model";
+﻿import type { Request, Response } from "express";
+import { Types } from "mongoose";
+import { CommunityAttachmentModel } from "../models/Community/CommunityAttachment.model";
 import { CommunityContentModel } from "../models/Community/CommunityContent.model";
 import { AppError } from "../utils/AppError";
+import {
+  requireActiveCommunityMember,
+  requireCommunityModerator,
+} from "../utils/communityAccess.utils";
+import { presentCommunityContent } from "../utils/communityContentPresentation.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 type CommunityContentKind = "post" | "announcement" | "message";
@@ -11,62 +17,103 @@ const isDuplicateKeyError = (error: unknown): boolean => {
     && (error as { code?: unknown }).code === 11000;
 };
 
-const requireCommunityMember = async (communityId: string, userId: string) => {
-  const community = await CommunityModel.findOne({
-    _id: communityId,
-    $or: [{ ownerId: userId }, { moderators: userId }, { members: userId }],
-  }).select("ownerId moderators");
+const contentPopulate = (query: any): any => {
+  return query
+    .populate("authorId", "firstName lastName avatarUrl")
+    .populate("attachments")
+    .populate({ path: "replyToId", select: "text authorId", populate: { path: "authorId", select: "firstName lastName" } });
+};
 
-  if (!community) {
-    throw new AppError(404, "Community room was not found", "COMMUNITY_ROOM_NOT_FOUND");
+const toContentView = (item: unknown): any => item as any;
+
+const encodeCursor = (createdAt: Date, id: Types.ObjectId): string => {
+  return Buffer.from(createdAt.toISOString() + ":" + id.toString()).toString("base64url");
+};
+
+const decodeCursor = (value: string): { createdAt: Date; id: Types.ObjectId } => {
+  let decoded: string;
+  try {
+    decoded = Buffer.from(value, "base64url").toString("utf8");
+  } catch {
+    throw new AppError(400, "The message cursor is invalid", "VALIDATION_ERROR");
   }
+  const separator = decoded.lastIndexOf(":");
+  const date = new Date(decoded.slice(0, separator));
+  const id = decoded.slice(separator + 1);
+  if (separator < 0 || Number.isNaN(date.getTime()) || !Types.ObjectId.isValid(id)) {
+    throw new AppError(400, "The message cursor is invalid", "VALIDATION_ERROR");
+  }
+  return { createdAt: date, id: new Types.ObjectId(id) };
+};
 
-  return community;
+const getMessage = async (communityId: string, messageId: string) => {
+  const message = await contentPopulate(CommunityContentModel.findOne({
+    _id: messageId,
+    communityId,
+    kind: "message",
+    deletedAt: { $exists: false },
+  }));
+  if (!message) {
+    throw new AppError(404, "Community message was not found", "COMMUNITY_MESSAGE_NOT_FOUND");
+  }
+  return message;
 };
 
 const listContent = async (
   request: Request,
   response: Response,
-  kind: CommunityContentKind,
-  responseKey: "posts" | "announcements" | "messages",
+  kind: Exclude<CommunityContentKind, "message">,
+  responseKey: "posts" | "announcements",
 ): Promise<Response> => {
-  await requireCommunityMember(request.params.id as string, request.auth?.id as string);
+  await requireActiveCommunityMember(request.params.id as string, request.auth?.id as string);
   const page = Number(request.query.page || 1);
   const limit = Number(request.query.limit || 20);
-  const query = {
-    communityId: request.params.id as string,
-    kind,
-    deletedAt: { $exists: false },
-  };
+  const query = { communityId: request.params.id as string, kind, deletedAt: { $exists: false } };
   const [items, total] = await Promise.all([
-    CommunityContentModel.find(query)
-      .populate("authorId", "firstName lastName avatarUrl")
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit),
+    contentPopulate(CommunityContentModel.find(query)).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
     CommunityContentModel.countDocuments(query),
   ]);
-
-  return sendSuccess(response, 200, `Community ${responseKey} retrieved`, {
-    [responseKey]: items.reverse(),
-    pagination: { page, limit, total },
+  const presented = await presentCommunityContent(items.reverse().map(toContentView), request.auth?.id as string);
+  return sendSuccess(response, 200, "Community " + responseKey + " retrieved", {
+    [responseKey]: presented,
+    pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
   });
 };
 
-export const listCommunityPosts = async (
-  request: Request,
-  response: Response,
-): Promise<Response> => listContent(request, response, "post", "posts");
+export const listCommunityPosts = async (request: Request, response: Response): Promise<Response> => {
+  return listContent(request, response, "post", "posts");
+};
 
-export const listCommunityAnnouncements = async (
-  request: Request,
-  response: Response,
-): Promise<Response> => listContent(request, response, "announcement", "announcements");
+export const listCommunityAnnouncements = async (request: Request, response: Response): Promise<Response> => {
+  return listContent(request, response, "announcement", "announcements");
+};
 
-export const listCommunityMessages = async (
-  request: Request,
-  response: Response,
-): Promise<Response> => listContent(request, response, "message", "messages");
+export const listCommunityMessages = async (request: Request, response: Response): Promise<Response> => {
+  await requireActiveCommunityMember(request.params.id as string, request.auth?.id as string);
+  const limit = Number(request.query.limit || 30);
+  const before = typeof request.query.before === "string" ? decodeCursor(request.query.before) : null;
+  const cursorFilter = before
+    ? { $or: [{ createdAt: { $lt: before.createdAt } }, { createdAt: before.createdAt, _id: { $lt: before.id } }] }
+    : {};
+  const query = {
+    communityId: request.params.id as string,
+    kind: "message" as const,
+    deletedAt: { $exists: false },
+    ...cursorFilter,
+  };
+  const rows = await contentPopulate(CommunityContentModel.find(query)).sort({ createdAt: -1, _id: -1 }).limit(limit + 1);
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const nextRow = pageRows[pageRows.length - 1];
+  const messages = await presentCommunityContent(pageRows.reverse().map(toContentView), request.auth?.id as string);
+  return sendSuccess(response, 200, "Community messages retrieved", {
+    messages,
+    pageInfo: {
+      nextCursor: hasMore && nextRow ? encodeCursor(nextRow.createdAt, nextRow._id) : null,
+      hasMore,
+    },
+  });
+};
 
 const createContent = async (
   request: Request,
@@ -74,21 +121,13 @@ const createContent = async (
   kind: Exclude<CommunityContentKind, "message">,
   responseKey: "post" | "announcement",
 ): Promise<Response> => {
-  const community = await requireCommunityMember(
-    request.params.id as string,
-    request.auth?.id as string,
-  );
-
-  if (
-    kind === "announcement"
-    && community.ownerId.toString() !== request.auth?.id
-    && !community.moderators.some((id) => id.toString() === request.auth?.id)
-  ) {
-    throw new AppError(
-      403,
-      "Only community owners and moderators can publish announcements",
-      "COMMUNITY_MODERATOR_REQUIRED",
-    );
+  const { community, membership } = await requireActiveCommunityMember(request.params.id as string, request.auth?.id as string);
+  const isModerator = membership.role === "owner" || membership.role === "moderator";
+  if (kind === "announcement" && !isModerator) {
+    throw new AppError(403, "Only community owners and moderators can publish announcements", "COMMUNITY_MODERATOR_REQUIRED");
+  }
+  if (kind === "post" && !community.membersCanCreatePosts && !isModerator) {
+    throw new AppError(403, "Only community moderators can create posts", "COMMUNITY_MODERATOR_REQUIRED");
   }
 
   const item = await CommunityContentModel.create({
@@ -98,72 +137,103 @@ const createContent = async (
     text: request.body.text,
     imageUrl: request.body.imageUrl,
   });
-  await item.populate("authorId", "firstName lastName avatarUrl");
-
-  request.app.get("io")?.to(`community:${community._id.toString()}`).emit(
-    `community:${kind}:new`,
-    item,
-  );
-  return sendSuccess(response, 201, `Community ${responseKey} created`, {
-    [responseKey]: item,
-  });
+  community.lastActivityAt = new Date();
+  await community.save();
+  const hydrated = await contentPopulate(CommunityContentModel.findById(item._id));
+  const [presented] = await presentCommunityContent([toContentView(hydrated)], request.auth?.id as string);
+  request.app.get("io")?.to("community:" + community._id.toString()).emit("community:" + kind + ":new", presented);
+  return sendSuccess(response, 201, "Community " + responseKey + " created", { [responseKey]: presented });
 };
 
-export const createCommunityPost = async (
-  request: Request,
-  response: Response,
-): Promise<Response> => createContent(request, response, "post", "post");
+export const createCommunityPost = async (request: Request, response: Response): Promise<Response> => {
+  return createContent(request, response, "post", "post");
+};
 
-export const createCommunityAnnouncement = async (
-  request: Request,
-  response: Response,
-): Promise<Response> => createContent(request, response, "announcement", "announcement");
+export const createCommunityAnnouncement = async (request: Request, response: Response): Promise<Response> => {
+  return createContent(request, response, "announcement", "announcement");
+};
 
-export const sendCommunityMessage = async (
-  request: Request,
-  response: Response,
-): Promise<Response> => {
-  const community = await requireCommunityMember(
-    request.params.id as string,
-    request.auth?.id as string,
-  );
+const resolveAttachments = async (attachmentIds: string[], userId: string) => {
+  if (attachmentIds.length === 0) return [];
+  const attachments = await CommunityAttachmentModel.find({
+    _id: { $in: attachmentIds },
+    ownerId: userId,
+    linkedMessageId: { $exists: false },
+  });
+  if (attachments.length !== attachmentIds.length) {
+    throw new AppError(422, "One or more message attachments are invalid", "COMMUNITY_ATTACHMENT_INVALID");
+  }
+  return attachments;
+};
+
+export const sendCommunityMessage = async (request: Request, response: Response): Promise<Response> => {
+  const { community, membership } = await requireActiveCommunityMember(request.params.id as string, request.auth?.id as string);
+  const isModerator = membership.role === "owner" || membership.role === "moderator";
+  if (community.messagePermission === "moderators" && !isModerator) {
+    throw new AppError(403, "Only community moderators can send messages", "COMMUNITY_MESSAGE_PERMISSION_DENIED");
+  }
+
   const lookup = {
     communityId: community._id,
     authorId: request.auth?.id,
     kind: "message" as const,
     clientMessageId: request.body.clientMessageId,
   };
-  const existing = await CommunityContentModel.findOne(lookup);
-
+  const existing = await contentPopulate(CommunityContentModel.findOne(lookup));
   if (existing) {
-    await existing.populate("authorId", "firstName lastName avatarUrl");
-    return sendSuccess(response, 200, "Community message retrieved", { message: existing });
+    const [message] = await presentCommunityContent([toContentView(existing)], request.auth?.id as string);
+    return sendSuccess(response, 200, "Community message retrieved", { message });
+  }
+
+  const attachmentIds = request.body.attachmentIds || [];
+  const attachments = await resolveAttachments(attachmentIds, request.auth?.id as string);
+  let replyToId: Types.ObjectId | undefined;
+  if (request.body.replyToMessageId) {
+    const parent = await getMessage(community._id.toString(), request.body.replyToMessageId);
+    replyToId = parent._id;
   }
 
   let message;
   try {
     message = await CommunityContentModel.create({
       ...lookup,
-      text: request.body.text,
-      imageUrl: request.body.imageUrl,
+      text: request.body.text || "",
+      attachments: [],
+      replyToId,
     });
   } catch (error) {
-    if (!isDuplicateKeyError(error)) {
-      throw error;
-    }
-
-    const duplicate = await CommunityContentModel.findOne(lookup)
-      .populate("authorId", "firstName lastName avatarUrl");
-    if (!duplicate) {
-      throw error;
-    }
-    return sendSuccess(response, 200, "Community message retrieved", { message: duplicate });
+    if (!isDuplicateKeyError(error)) throw error;
+    const duplicate = await contentPopulate(CommunityContentModel.findOne(lookup));
+    if (!duplicate) throw error;
+    const [presented] = await presentCommunityContent([toContentView(duplicate)], request.auth?.id as string);
+    return sendSuccess(response, 200, "Community message retrieved", { message: presented });
   }
 
-  await message.populate("authorId", "firstName lastName avatarUrl");
-  request.app.get("io")?.to(`community:${community._id.toString()}`).emit(
-    "community:message:new",
-    message,
-  );
-  return sendSuccess(response, 201, "Community message sent", { message });
+  if (attachments.length > 0) {
+    // Link each owned upload exactly once. Checking modifiedCount prevents two
+    // concurrent messages from silently sharing the same attachment.
+    const linked = await CommunityAttachmentModel.updateMany(
+      { _id: { $in: attachments.map((attachment) => attachment._id) }, linkedMessageId: { $exists: false } },
+      { $set: { linkedCommunityId: community._id, linkedMessageId: message._id } },
+    );
+    if (linked.modifiedCount !== attachments.length) {
+      await CommunityContentModel.deleteOne({ _id: message._id });
+      throw new AppError(409, "One or more message attachments were already used", "COMMUNITY_ATTACHMENT_INVALID");
+    }
+    message.attachments = attachments.map((attachment) => attachment._id);
+    await message.save();
+  }
+  community.lastActivityAt = new Date();
+  await community.save();
+  const hydrated = await contentPopulate(CommunityContentModel.findById(message._id));
+  const [presented] = await presentCommunityContent([toContentView(hydrated)], request.auth?.id as string);
+  request.app.get("io")?.to("community:" + community._id.toString()).emit("community:message:new", presented);
+  return sendSuccess(response, 201, "Community message sent", { message: presented });
+};
+
+export const getCommunityMessageForAction = getMessage;
+export const presentOneCommunityContent = async (item: unknown, viewerId: string): Promise<Record<string, unknown>> => {
+  const [presented] = await presentCommunityContent([toContentView(item)], viewerId);
+  if (!presented) throw new AppError(404, "Community content was not found", "COMMUNITY_MESSAGE_NOT_FOUND");
+  return presented;
 };

@@ -1,4 +1,4 @@
-# Community Connect Backend
+﻿# Community Connect Backend
 
 Production-oriented Node.js/TypeScript backend for the Community Connect Expo app. It follows the owner's established `app -> router -> controller/utils -> model` style while adding strict typing, reusable validation, route-level authorization, token rotation, financial idempotency, and centralized OpenAPI documentation.
 
@@ -95,13 +95,21 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
-| GET | `/users/me` | Yes | Get my profile |
-| PATCH | `/users/me` | Yes | Update allowlisted profile fields |
+| GET | `/users/me` | Yes | Get my profile, personalization fields, and connection/event totals |
+| PATCH | `/users/me` | Yes | Update allowlisted profile and personalization fields |
+| PATCH | `/users/me/avatar` | Yes | Upload and save one profile photo |
 | PATCH | `/users/me/password` | Yes | Change password and revoke sessions |
 | POST | `/users/me/push-tokens` | Yes | Register Expo device token |
 | DELETE | `/users/me/push-tokens` | Yes | Remove Expo device token |
 | DELETE | `/users/me` | Yes | Confirm password and anonymize account |
 | POST | `/users/{id}/reports` | Yes | Report an active user account for moderation |
+
+Personalization fields on a user are `preferredSetting` (`indoor` or `outdoor`),
+`preferredGroupSize` (`small`, `medium`, or `large`), `participationRole`
+(`participant` or `organizer`), and `hobbies` (up to 20 strings). The
+participation role is a preference only and never grants organizer, moderator,
+or admin permissions. `PATCH /users/me` accepts these fields together with
+`phone`, `interests`, and the other documented allowlisted profile fields. GET /users/me also returns totals.connections (accepted friendships) and totals.events (all events created by the signed-in user, across statuses).
 
 ### Events and Tickets
 
@@ -147,6 +155,38 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | GET | `/communities/{id}/messages` | Yes | List paginated room message history |
 | POST | `/communities/{id}/messages` | Yes | Send idempotent room message |
 | POST | `/communities/{id}/reports` | Yes | Report an accessible community for moderation |
+| GET | `/users/me/communities` | Yes | List my active/pending communities with unread counts |
+| GET | `/communities/{id}/rules` | Public/member | Get public or accessible community rules |
+| PUT | `/communities/{id}/rules` | Owner/mod | Replace ordered community rules and consequences |
+| GET | `/communities/{id}/settings` | Member | Get messaging and join settings |
+| PATCH | `/communities/{id}/settings` | Owner/mod | Update settings and securely rotate an access code |
+| PATCH | `/communities/{id}/members/{userId}` | Owner/mod | Change eligible role or membership status |
+| DELETE | `/communities/{id}/members/{userId}` | Owner/mod | Remove an eligible community member |
+| PUT | `/communities/{id}/bans/{userId}` | Owner/mod | Ban a member with reason and optional expiry |
+| DELETE | `/communities/{id}/bans/{userId}` | Owner/mod | Unban a removed member |
+| POST | `/communities/{id}/join-requests` | Yes | Join open communities or request/validate private access |
+| POST | `/communities/{id}/invites` | Owner/mod | Create hashed, expiring, use-limited invite token |
+| GET | `/communities/{id}/join-requests` | Owner/mod | Review queued membership requests |
+| PATCH | `/communities/{id}/join-requests/{requestId}` | Owner/mod | Approve or reject a join request |
+| DELETE | `/communities/{id}/join-requests/me` | Requester | Cancel my pending join request |
+| POST | `/communities/{id}/ownership-transfer` | Owner | Transfer ownership to an active member |
+| PATCH | `/communities/{id}/posts/{postId}` | Author/mod | Edit a community post |
+| DELETE | `/communities/{id}/posts/{postId}` | Author/mod | Delete a community post |
+| PATCH | `/communities/{id}/announcements/{announcementId}` | Owner/mod | Edit or pin announcement |
+| DELETE | `/communities/{id}/announcements/{announcementId}` | Owner/mod | Delete announcement |
+| PUT | `/communities/{id}/messages/read` | Member | Save last read message and clear unread badge |
+| PATCH | `/communities/{id}/notification-preferences/me` | Member | Mute/unmute or set notification level |
+| PATCH | `/communities/{id}/messages/{messageId}` | Author/mod | Edit message |
+| DELETE | `/communities/{id}/messages/{messageId}` | Author/mod | Delete message |
+| PUT | `/communities/{id}/messages/{messageId}/reactions/{emoji}` | Member | Add reaction |
+| DELETE | `/communities/{id}/messages/{messageId}/reactions/{emoji}` | Member | Remove reaction |
+| PUT | `/communities/{id}/messages/{messageId}/pin` | Owner/mod | Pin message |
+| DELETE | `/communities/{id}/messages/{messageId}/pin` | Owner/mod | Unpin message |
+| POST | `/communities/{id}/messages/{messageId}/reports` | Member | Report harmful message |
+| POST | `/communities/{id}/calls` | Owner/mod | Start voice or video call |
+| GET | `/communities/{id}/calls/active` | Member | Get active call |
+| POST | `/communities/{id}/calls/{callId}/join` | Member | Get short-lived server-issued call credential |
+| DELETE | `/communities/{id}/calls/{callId}` | Starter/mod | End active call |
 | GET | `/friends` | Yes | List accepted friendships with safe requester/addressee profiles |
 | GET | `/friends/requests` | Yes | List inbound requests with safe requester/addressee profiles |
 | GET | `/friends/suggestions` | Yes | List users outside current graph |
@@ -205,9 +245,12 @@ Every route below is also registered in `docs/endpoint-registry.ts` and rendered
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
 | POST | `/uploads/images` | Yes | Validate and upload one image to Cloudinary |
+| POST | `/uploads/files` | Yes | MIME-checked community image, PDF, or document attachment |
 | POST | `/webhooks/paystack` | HMAC | Verify, deduplicate, and process Paystack event |
 
 ## Realtime Socket.IO
+
+See [Realtime Community and Calls Guide](./docs/realtime-community-calls.md) for Socket.IO payloads, acknowledgements, LiveKit setup, and Expo integration.
 
 Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (preferred) or `Authorization: Bearer ...`. Native clients without an Origin header are supported; browser origins must match `FRONTEND_URLS`.
 
@@ -219,6 +262,11 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 | `message:new` | Server -> room | Emitted after REST message persistence |
 | `conversation:read` | Server -> room | Emitted after REST read persistence |
 | `typing:start` / `typing:stop` | Bidirectional | Ephemeral typing state; messages still use REST |
+| `community:join` / `community:leave` | Client -> server | Verifies active membership before room join; returns structured acknowledgement |
+| `community:typing` | Bidirectional | Emits active-member typing state inside the joined community room |
+| `community:message:new` / `community:message:updated` / `community:message:deleted` | Server -> room | Realtime community chat persistence events |
+| `community:post:new` / `community:announcement:new` / `community:member:updated` | Server -> room | Realtime community content and membership events |
+| `community:call:started` / `community:call:updated` / `community:call:ended` | Server -> room | Community voice/video call lifecycle events |
 
 ## Admin Portal and Platform Charges
 
@@ -298,3 +346,4 @@ See [`AGENTS.md`](./AGENTS.md) for the durable architecture and security rules. 
 app.ts -> router/<domain> -> middleware -> functional controller -> models/<domain>
                                       \-> Community_AI or utils/<provider behavior>
 ```
+

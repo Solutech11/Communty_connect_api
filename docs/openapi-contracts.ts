@@ -1,4 +1,4 @@
-export type OpenApiSchema = Record<string, unknown>;
+﻿export type OpenApiSchema = Record<string, unknown>;
 
 export interface RequestBodyContract {
   contentType: "application/json" | "multipart/form-data";
@@ -38,6 +38,25 @@ const user = {
   interests: ["technology", "music"],
   avatarUrl: "https://res.cloudinary.com/example/avatar.webp",
   createdAt,
+};
+
+const profileUser = {
+  ...user,
+  phone: "+2348012345678",
+  bio: "Community organizer and product designer.",
+  country: "Nigeria",
+  location: { type: "Point", coordinates: [3.3792, 6.5244] },
+  preferredSetting: "indoor",
+  preferredGroupSize: "medium",
+  participationRole: "participant",
+  hobbies: ["photography", "cooking"],
+};
+
+const profileTotals = {
+  connections: 42,
+  // This count includes all events created by the signed-in user, regardless
+  // of whether an event is draft, published, completed, or cancelled.
+  events: 6,
 };
 
 const secondUser = {
@@ -331,12 +350,101 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "POST /auth/forgot-password": jsonBody({ email: "ada@example.com" }, ["email"]),
   "POST /auth/reset-password": jsonBody({ email: "ada@example.com", otp: "123456", newPassword: "NewStrongPass2!" }, ["email", "otp", "newPassword"]),
 
-  "PATCH /users/me": jsonBody({ firstName: "Ada", lastName: "Okafor", phone: "+2348012345678", bio: "Community organizer and product designer.", avatarUrl: "https://res.cloudinary.com/example/avatar.webp", country: "Nigeria", state: "Lagos", lga: "Ikeja", location: { type: "Point", coordinates: [3.3792, 6.5244] }, interests: ["technology", "music"] }, [], "Send at least one profile field. GeoJSON coordinates are [longitude, latitude]."),
+  "PATCH /users/me": {
+    ...jsonBody({
+      firstName: "Ada",
+      lastName: "Okafor",
+      phone: "+2348012345678",
+      bio: "Community organizer and product designer.",
+      avatarUrl: "https://res.cloudinary.com/example/avatar.webp",
+      country: "Nigeria",
+      state: "Lagos",
+      lga: "Ikeja",
+      location: { type: "Point", coordinates: [3.3792, 6.5244] },
+      interests: ["technology", "music"],
+      preferredSetting: "indoor",
+      preferredGroupSize: "medium",
+      participationRole: "participant",
+      hobbies: ["photography", "cooking"],
+    }, [], "Send at least one profile field. GeoJSON coordinates are [longitude, latitude]. Personalization values are normalized lowercase enums."),
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      minProperties: 1,
+      properties: {
+        firstName: { type: "string", minLength: 2, maxLength: 60 },
+        lastName: { type: "string", minLength: 2, maxLength: 60 },
+        phone: { type: "string", minLength: 7, maxLength: 24 },
+        bio: { type: "string", maxLength: 500 },
+        avatarUrl: { type: "string", format: "uri" },
+        country: { type: "string", maxLength: 80 },
+        state: { type: "string", maxLength: 80 },
+        lga: { type: "string", maxLength: 100 },
+        location: {
+          type: "object",
+          additionalProperties: false,
+          required: ["coordinates"],
+          properties: {
+            type: { type: "string", const: "Point", default: "Point" },
+            coordinates: {
+              type: "array",
+              prefixItems: [
+                { type: "number", minimum: -180, maximum: 180 },
+                { type: "number", minimum: -90, maximum: 90 },
+              ],
+              minItems: 2,
+              maxItems: 2,
+            },
+          },
+        },
+        interests: {
+          type: "array",
+          maxItems: 20,
+          items: { type: "string", minLength: 1, maxLength: 40 },
+        },
+        preferredSetting: { type: "string", enum: ["indoor", "outdoor"] },
+        preferredGroupSize: { type: "string", enum: ["small", "medium", "large"] },
+        participationRole: { type: "string", enum: ["participant", "organizer"] },
+        hobbies: {
+          type: "array",
+          maxItems: 20,
+          items: { type: "string", minLength: 1, maxLength: 40 },
+        },
+      },
+    },
+  },
+  "PATCH /users/me/avatar": {
+    contentType: "multipart/form-data",
+    description: "One JPEG, PNG, or WebP profile image. The API uploads it to Cloudinary and saves the resulting secure URL to the signed-in user.",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["image"],
+      properties: {
+        image: { type: "string", format: "binary" },
+      },
+    },
+    example: { image: "(binary file)" },
+  },
   "PATCH /users/me/password": jsonBody({ currentPassword: "StrongPass1!", newPassword: "NewStrongPass2!" }, ["currentPassword", "newPassword"]),
   "POST /users/me/push-tokens": jsonBody({ token: "ExponentPushToken[example_device_token]" }, ["token"]),
   "DELETE /users/me/push-tokens": jsonBody({ token: "ExponentPushToken[example_device_token]" }, ["token"]),
   "DELETE /users/me": jsonBody({ password: "StrongPass1!" }, ["password"]),
 
+  "PUT /communities/{id}/rules": jsonBody({ introduction: "Keep the community welcoming and useful.", rules: [{ title: "Be respectful", description: "Treat every member with respect.", order: 0 }], consequences: ["Repeated violations may result in removal."] }, ["introduction", "rules", "consequences"]),
+  "PATCH /communities/{id}/settings": jsonBody({ joinPolicy: "approval", messagePermission: "moderators", membersCanCreatePosts: true, membersCanInvite: false, showMemberList: true }, [], "Send at least one community setting."),
+  "PATCH /communities/{id}/members/{userId}": jsonBody({ role: "moderator", status: "active" }, [], "Owners may change roles; owners and moderators may update eligible member status."),
+  "PUT /communities/{id}/bans/{userId}": jsonBody({ reason: "Repeated harassment in community messages.", expiresAt: "2026-12-31T23:59:59.000Z" }, ["reason"]),
+  "POST /communities/{id}/join-requests": jsonBody({ message: "I would like to join the community." }, [], "For an open free public community this activates membership immediately; otherwise a pending request is created."),
+  "PATCH /communities/{id}/join-requests/{requestId}": jsonBody({ status: "approved", note: "Welcome to the community." }, ["status"]),
+  "POST /communities/{id}/invites": jsonBody({ expiresAt: "2026-12-31T23:59:59.000Z", maxUses: 10 }, ["expiresAt"]),
+  "POST /communities/{id}/calls": jsonBody({ type: "video", title: "Weekly planning" }, ["type"]),
+  "PATCH /communities/{id}/announcements/{announcementId}": jsonBody({ text: "Updated schedule", imageUrl: "https://res.cloudinary.com/example/announcement.webp", pinned: true }, [], "Send at least one editable announcement field."),
+  "PATCH /communities/{id}/messages/{messageId}": jsonBody({ text: "Updated community message" }, ["text"]),
+  "POST /communities/{id}/messages/{messageId}/reports": jsonBody({ reason: "harassment", details: "This message violates the community rules." }, ["reason"]),
+  "PUT /communities/{id}/messages/read": jsonBody({ lastReadMessageId: secondId }, ["lastReadMessageId"]),
+  "PATCH /communities/{id}/notification-preferences/me": jsonBody({ level: "mentions" }, ["level"]),
+  "PATCH /communities/{id}/posts/{postId}": jsonBody({ text: "Updated weekly community update.", imageUrl: "https://res.cloudinary.com/example/community-post.webp" }, [], "Send at least one editable post field."),  "POST /communities/{id}/ownership-transfer": jsonBody({ newOwnerId: secondId, currentPassword: "StrongPass1!" }, ["newOwnerId"]),
   "POST /events": jsonBody({ title: "Lagos Tech Meetup 2026", description: "An evening of practical talks, networking, and community building.", coverImageUrl: "https://res.cloudinary.com/example/event.webp", activityType: "Technology", targetAudience: "Developers and founders", setting: "indoor", country: "Nigeria", state: "Lagos", lga: "Ikeja", venueName: "Community Hall", address: "12 Example Street, Ikeja", coordinates: { type: "Point", coordinates: [3.3792, 6.5244] }, startsAt: "2026-09-20T16:00:00.000Z", endsAt: "2026-09-20T20:00:00.000Z", timezone: "Africa/Lagos", contactPhone: "+2348012345678", maxCapacity: 250, tags: ["technology", "networking"] }, ["title", "description", "activityType", "setting", "state", "lga", "venueName", "address", "startsAt", "endsAt", "maxCapacity"]),
   "PATCH /events/{id}": jsonBody({ title: "Updated Lagos Tech Meetup 2026", description: "Updated event description with enough information for attendees.", startsAt: "2026-09-20T17:00:00.000Z", endsAt: "2026-09-20T21:00:00.000Z", maxCapacity: 300 }, [], "Send at least one event field. If both dates are sent, endsAt must be later than startsAt."),
   "POST /events/{id}/orders": jsonBody({ ticketTypeId: secondId, quantity: 1 }, ["ticketTypeId", "quantity"]),
@@ -348,7 +456,7 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "PATCH /communities/{id}": jsonBody({ description: "Updated community description for product builders across Lagos.", membershipType: "premium", membershipPriceKobo: 250000 }, [], "Send at least one community field. Premium communities require a positive membershipPriceKobo."),
   "POST /communities/{id}/posts": jsonBody({ text: "Welcome to our weekly community update.", imageUrl: "https://res.cloudinary.com/example/community-post.webp" }, ["text"]),
   "POST /communities/{id}/announcements": jsonBody({ text: "Saturday's meetup starts at 10:00 AM.", imageUrl: "https://res.cloudinary.com/example/announcement.webp" }, ["text"]),
-  "POST /communities/{id}/messages": jsonBody({ clientMessageId: "community-mobile-1784370000000", text: "Is anyone attending the meetup?", imageUrl: "https://res.cloudinary.com/example/community-chat.webp" }, ["clientMessageId", "text"]),
+  "POST /communities/{id}/messages": jsonBody({ clientMessageId: "550e8400-e29b-41d4-a716-446655440000", text: "Is anyone attending the meetup?", attachmentIds: [secondId], replyToMessageId: id }, ["clientMessageId"], "Supply text or 1-5 owned attachment IDs; replyToMessageId must be a message in the same community."),
   "POST /communities/{id}/reports": jsonBody({ reason: "unsafe", details: "This community is promoting an unsafe gathering location." }, ["reason"]),
 
   "POST /events/{id}/reports": jsonBody({ reason: "unsafe", details: "The event venue details appear unsafe and misleading." }, ["reason"]),
@@ -372,7 +480,12 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "POST /wallet/withdrawals": jsonBody({ bankAccountId: id, amountKobo: 100000 }, ["bankAccountId", "amountKobo"], "The configured withdrawal fee is deducted from amountKobo before Paystack payout."),
   "POST /wallet/withdrawals/{reference}/finalize": jsonBody({ otp: "123456" }, ["otp"]),
 
-  "POST /uploads/images": {
+  "POST /uploads/files": {
+    contentType: "multipart/form-data",
+    description: "One MIME-checked community image, PDF, or document file.",
+    schema: { type: "object", required: ["file", "folder"], properties: { file: { type: "string", format: "binary" }, folder: { type: "string", const: "community-chat" } } },
+    example: { folder: "community-chat", file: "(binary file)" },
+  },  "POST /uploads/images": {
     contentType: "multipart/form-data",
     description: "One JPEG, PNG, or WebP image plus an optional destination folder.",
     schema: { type: "object", required: ["image"], properties: { image: { type: "string", format: "binary" }, folder: { type: "string", enum: ["avatars", "events", "communities", "disputes", "chat", "uploads"], default: "uploads" } } },
@@ -382,7 +495,23 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
 };
 
 export const queryParameterContracts: Record<string, QueryParameterContract[]> = {
-  "GET /events": [
+  "GET /users/me/communities": [
+    ...paginationQuery,
+    query("search", "Search community name and description.", { type: "string", maxLength: 100 }, "Lagos"),
+    query("role", "Filter by viewer role.", { type: "string", enum: ["owner", "moderator", "member"] }, "member"),
+    query("status", "Filter active or pending membership.", { type: "string", enum: ["pending", "active"] }, "active"),
+    query("unreadOnly", "Only include communities with unread messages.", { type: "string", enum: ["true", "false"] }, "true"),
+  ],
+  "GET /communities/{id}/members": [
+    ...paginationQuery,
+    query("search", "Search member name.", { type: "string", maxLength: 100 }, "Ada"),
+    query("role", "Filter community role.", { type: "string", enum: ["owner", "moderator", "member"] }, "member"),
+    query("status", "Filter active or banned members.", { type: "string", enum: ["active", "banned"] }, "active"),
+  ],
+  "GET /communities/{id}/join-requests": [
+    ...paginationQuery.slice(0, 2),
+    query("status", "Filter request review state.", { type: "string", enum: ["pending", "approved", "rejected"] }, "pending"),
+  ],  "GET /events": [
     ...paginationQuery,
     query("state", "Filter by state.", { type: "string", maxLength: 80 }, "Lagos"),
     query("lga", "Filter by local government area.", { type: "string", maxLength: 100 }, "Ikeja"),
@@ -399,7 +528,10 @@ export const queryParameterContracts: Record<string, QueryParameterContract[]> =
   ],
   "GET /communities/{id}/posts": paginationQuery.slice(0, 2),
   "GET /communities/{id}/announcements": paginationQuery.slice(0, 2),
-  "GET /communities/{id}/messages": paginationQuery.slice(0, 2),
+  "GET /communities/{id}/messages": [
+    query("limit", "Maximum messages returned before the cursor.", { type: "integer", minimum: 1, maximum: 100, default: 30 }, 30),
+    query("before", "Opaque cursor from pageInfo.nextCursor for older messages.", { type: "string" }, "MjAyNi0wNy0xOFQwOTozMDowMC4wMDBaOjY2NTBmMGM4YjlmMWMyZDNlNGE1YjZjNw"),
+  ],
   "GET /communities": [
     ...paginationQuery,
     query("category", "Filter by category.", { type: "string", maxLength: 60 }, "Technology"),
@@ -426,22 +558,54 @@ export const queryParameterContracts: Record<string, QueryParameterContract[]> =
 
 export const successContracts: Record<string, SuccessContract> = {
   "POST /auth/register": ok("Account created. Check your email for the verification code.", { userId: id, email: "ada@example.com" }, 201),
-  "POST /auth/verify-email": ok("Email verified", { user, session }),
+  "POST /auth/verify-email": ok("Email verified", { user: profileUser, session }),
   "POST /auth/resend-verification": ok("If the account requires verification, a new code has been sent."),
-  "POST /auth/login": ok("Signed in", { user, session }),
+  "POST /auth/login": ok("Signed in", { user: profileUser, session }),
   "POST /auth/refresh": ok("Session refreshed", { session }),
   "POST /auth/logout": ok("Signed out"),
   "POST /auth/forgot-password": ok("If the account exists, a password reset code has been sent."),
   "POST /auth/reset-password": ok("Password reset. Sign in with your new password."),
 
-  "GET /users/me": ok("Profile retrieved", { user }),
-  "PATCH /users/me": ok("Profile updated", { user: { ...user, bio: "Community organizer and product designer." } }),
+  "GET /users/me": ok("Profile retrieved", { user: profileUser, totals: profileTotals }),
+  "PATCH /users/me": ok("Profile updated", { user: profileUser }),
+  "PATCH /users/me/avatar": ok("Profile photo updated", { user: { ...profileUser, avatarUrl: "https://res.cloudinary.com/example/image/upload/v1784370000/avatars/example.webp" } }),
   "PATCH /users/me/password": ok("Password changed. Sign in again on your devices."),
   "POST /users/me/push-tokens": ok("Push token registered"),
   "DELETE /users/me/push-tokens": ok("Push token removed"),
   "DELETE /users/me": ok("Account deleted"),
   "POST /users/{id}/reports": ok("Report submitted", { report: { ...report, targetType: "user" } }, 201),
 
+  "GET /users/me/communities": ok("My communities retrieved", { communities: [{ ...community, coverImageUrl: community.imageUrl, avatarImageUrl: community.imageUrl, memberCount: 8, viewerMembership: { role: "member", status: "active", joinedAt: createdAt, muted: false }, unreadCount: 2, lastActivityAt: createdAt }], pagination: { page: 1, limit: 20, total: 1, totalPages: 1 } }),
+  "GET /communities/{id}/rules": ok("Community rules retrieved", { rules: { communityId: id, introduction: "Keep the community welcoming and useful.", rules: [{ _id: secondId, title: "Be respectful", description: "Treat every member with respect.", order: 0 }], consequences: ["Repeated violations may result in removal."], updatedAt: createdAt, updatedBy: secondUser } }),
+  "PUT /communities/{id}/rules": ok("Community rules retrieved", { rules: { communityId: id, introduction: "Keep the community welcoming and useful.", rules: [], consequences: [], updatedAt: createdAt, updatedBy: user } }),
+  "GET /communities/{id}/settings": ok("Community settings retrieved", { settings: { joinPolicy: "approval", messagePermission: "moderators", membersCanCreatePosts: true, membersCanInvite: false, showMemberList: true } }),
+  "PATCH /communities/{id}/settings": ok("Community settings updated", { settings: { joinPolicy: "approval", messagePermission: "moderators", membersCanCreatePosts: true, membersCanInvite: false, showMemberList: true } }),
+  "PATCH /communities/{id}/members/{userId}": ok("Community member updated", { member: { user: secondUser, communityRole: "moderator", status: "active", joinedAt: createdAt } }),
+  "DELETE /communities/{id}/members/{userId}": ok("Community member removed", { removedUserId: secondId }),
+  "PUT /communities/{id}/bans/{userId}": ok("Community member banned", { userId: secondId, status: "banned", reason: "Repeated harassment in community messages.", expiresAt: "2026-12-31T23:59:59.000Z" }),
+  "DELETE /communities/{id}/bans/{userId}": ok("Community member unbanned", { userId: secondId, status: "removed" }),
+  "POST /communities/{id}/join-requests": ok("Community join request created", { joinRequest: { _id: id, communityId: secondId, requesterId: user, message: "I would like to join the community.", status: "pending", createdAt } }, 201),
+  "GET /communities/{id}/join-requests": ok("Community join requests retrieved", { joinRequests: [], pagination: { page: 1, limit: 20, total: 0, totalPages: 1 } }),
+  "PATCH /communities/{id}/join-requests/{requestId}": ok("Community join request reviewed", { joinRequest: { _id: id, status: "approved" }, member: { user: user, communityRole: "member", status: "active", joinedAt: createdAt } }),
+  "DELETE /communities/{id}/join-requests/me": ok("Community join request cancelled", { joinRequestId: id, status: "cancelled" }),
+  "POST /communities/{id}/invites": ok("Community invite created", { invite: { _id: id, token: "short-lived-invite-token", expiresAt: "2026-12-31T23:59:59.000Z", maxUses: 10 } }, 201),
+  "POST /communities/{id}/calls": ok("Community call started", { call: { _id: id, communityId: secondId, type: "video", status: "active", startedBy: id, participantCount: 0, startedAt: createdAt, endedAt: null } }, 201),
+  "GET /communities/{id}/calls/active": ok("Active community call retrieved", { call: { _id: id, communityId: secondId, type: "voice", status: "active", startedBy: secondId, participantCount: 4, startedAt: createdAt, endedAt: null } }),
+  "POST /communities/{id}/calls/{callId}/join": ok("Community call credentials created", { call: { _id: id, communityId: secondId, type: "video", status: "active", startedBy: secondId, participantCount: 4, startedAt: createdAt, endedAt: null }, provider: "livekit", roomName: "community-example", participantToken: "server-issued-short-lived-token", expiresAt: "2026-07-18T09:40:00.000Z" }),
+  "DELETE /communities/{id}/calls/{callId}": ok("Community call ended", { call: { _id: id, communityId: secondId, type: "voice", status: "ended", startedBy: secondId, participantCount: 0, startedAt: createdAt, endedAt: "2026-07-18T10:30:00.000Z" } }),
+  "PUT /communities/{id}/messages/read": ok("Community messages marked read", { communityId: id, lastReadMessageId: secondId, lastReadAt: createdAt, unreadCount: 0 }),
+  "PATCH /communities/{id}/notification-preferences/me": ok("Community notification preference updated", { communityId: id, level: "mentions", updatedAt: createdAt }),
+  "PATCH /communities/{id}/announcements/{announcementId}": ok("Community announcement updated", { announcement: communityAnnouncement }),
+  "DELETE /communities/{id}/announcements/{announcementId}": ok("Community announcement deleted", { announcementId: id, deletedAt: createdAt }),
+  "PATCH /communities/{id}/messages/{messageId}": ok("Community message updated", { message: communityMessage }),
+  "DELETE /communities/{id}/messages/{messageId}": ok("Community message deleted", { messageId: id, deletedAt: createdAt }),
+  "PUT /communities/{id}/messages/{messageId}/reactions/{emoji}": ok("Community message reactions updated", { messageId: id, reactions: [{ emoji: "👍", count: 2, reactedByViewer: true }] }),
+  "DELETE /communities/{id}/messages/{messageId}/reactions/{emoji}": ok("Community message reactions updated", { messageId: id, reactions: [{ emoji: "👍", count: 1, reactedByViewer: false }] }),
+  "PUT /communities/{id}/messages/{messageId}/pin": ok("Community message pinned", { message: communityMessage }),
+  "DELETE /communities/{id}/messages/{messageId}/pin": ok("Community message unpinned", { message: communityMessage }),
+  "PATCH /communities/{id}/posts/{postId}": ok("Community post updated", { post: communityPost }),
+  "DELETE /communities/{id}/posts/{postId}": ok("Community post deleted", { postId: id, deletedAt: createdAt }),
+  "POST /communities/{id}/messages/{messageId}/reports": ok("Community message reported", { report: { _id: id, targetType: "community_message", targetId: secondId, status: "open", createdAt } }, 201),  "POST /communities/{id}/ownership-transfer": ok("Community ownership transferred", { communityId: id, previousOwnerId: id, newOwnerId: secondId, transferredAt: createdAt }),
   "GET /events": ok("Events retrieved", { events: [event], sort: "soonest", pagination: { page: 1, limit: 20, total: 1 } }),
   "GET /events/recommended": ok("Personalized nearby events retrieved", { events: [{ ...event, distanceKm: 4.8, recommendationScore: 0.91 }], locationUsed: { latitude: 6.5244, longitude: 3.3792 } }),
   "GET /events/created/me": ok("Created events retrieved", { events: [event] }),
@@ -490,7 +654,7 @@ export const successContracts: Record<string, SuccessContract> = {
   "POST /chat/conversations/{id}/read": ok("Conversation marked as read"),
 
   "POST /ai/chat": ok("AI response generated", { sessionId: id, message: "Here are nearby technology events that match your interests." }),
-  "POST /ai/event-copy": ok("Event copy generated", { sessionId: id, message: "Lagos Tech Meetup 2026 — practical talks and meaningful networking for builders." }),
+  "POST /ai/event-copy": ok("Event copy generated", { sessionId: id, message: "Lagos Tech Meetup 2026 â€” practical talks and meaningful networking for builders." }),
   "POST /ai/event-recommendations": ok("Personalized event recommendations generated", { events: [{ ...event, distanceKm: 4.8, recommendationScore: 0.91 }] }),
   "POST /ai/conversations/{id}/summary": ok("Conversation summarized", { sessionId: id, message: "The participants agreed to attend the meetup and meet at the entrance." }),
   "GET /ai/sessions": ok("AI sessions retrieved", { sessions: [{ _id: id, purpose: "assistant", lastUsedAt: createdAt }] }),
@@ -523,6 +687,7 @@ export const successContracts: Record<string, SuccessContract> = {
   "POST /wallet/withdrawals": ok("Withdrawal submitted", { transaction: { ...transaction, reference: "withdrawal_550e8400-e29b-41d4-a716-446655440000", type: "withdrawal", direction: "debit", amountKobo: 100000, feeKobo: 1000, status: "processing" }, charge: { withdrawalAmountKobo: 100000, feeKobo: 1000, payoutAmountKobo: 99000 } }, 202),
   "POST /wallet/withdrawals/{reference}/finalize": ok("Withdrawal OTP accepted", { transaction: { ...transaction, type: "withdrawal", status: "processing" } }, 202),
 
+  "POST /uploads/files": ok("Community file uploaded", { attachment: { _id: id, url: "https://res.cloudinary.com/example/raw/upload/community-chat/example.pdf", type: "pdf", name: "meeting-notes.pdf", mimeType: "application/pdf", sizeBytes: 184320, thumbnailUrl: null } }, 201),
   "POST /uploads/images": ok("Image uploaded", { url: "https://res.cloudinary.com/example/image/upload/v1784370000/events/example.webp", publicId: "events/example", width: 1600, height: 900, format: "webp", bytes: 184320 }, 201),
   "POST /webhooks/paystack": { status: 200, description: "Webhook accepted", example: { received: true } },
 };

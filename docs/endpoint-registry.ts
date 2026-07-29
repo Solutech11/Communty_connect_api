@@ -1,4 +1,4 @@
-export type HttpMethod = "get" | "post" | "patch" | "delete";
+﻿export type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
 export interface EndpointDefinition {
   method: HttpMethod;
@@ -22,14 +22,44 @@ export const apiEndpoints: EndpointDefinition[] = [
   { method: "post", path: "/auth/forgot-password", tag: "Auth", summary: "Request password reset", description: "Emails a short-lived reset code without revealing whether the account exists.", auth: false, requestBody: true },
   { method: "post", path: "/auth/reset-password", tag: "Auth", summary: "Reset password", description: "Consumes a reset code, changes the password, and revokes every active session.", auth: false, requestBody: true },
 
-  { method: "get", path: "/users/me", tag: "Users", summary: "Get my profile", description: "Returns the authenticated user's safe profile fields.", auth: true },
-  { method: "patch", path: "/users/me", tag: "Users", summary: "Update my profile", description: "Updates allowlisted profile fields only.", auth: true, requestBody: true },
+  { method: "get", path: "/users/me", tag: "Users", summary: "Get my profile", description: "Returns the authenticated user's safe profile fields and totals for accepted connections and events they created.", auth: true },
+  { method: "patch", path: "/users/me", tag: "Users", summary: "Update my profile", description: "Updates allowlisted identity, location, interests, hobbies, preferred setting, preferred group size, and participation-role fields only.", auth: true, requestBody: true },
+  { method: "patch", path: "/users/me/avatar", tag: "Users", summary: "Update my profile photo", description: "Uploads one authenticated JPEG, PNG, or WebP image to Cloudinary, then saves its secure URL as the signed-in user's avatar.", auth: true, requestBody: true },
   { method: "patch", path: "/users/me/password", tag: "Users", summary: "Change password", description: "Verifies the current password, changes it, and revokes all sessions.", auth: true, requestBody: true },
   { method: "post", path: "/users/me/push-tokens", tag: "Users", summary: "Register Expo push token", description: "Adds a validated Expo push token to the signed-in account.", auth: true, requestBody: true },
   { method: "delete", path: "/users/me/push-tokens", tag: "Users", summary: "Remove Expo push token", description: "Removes a device push token from the signed-in account.", auth: true, requestBody: true },
   { method: "delete", path: "/users/me", tag: "Users", summary: "Delete my account", description: "Requires password confirmation, anonymizes the account, and revokes sessions.", auth: true, requestBody: true },
   { method: "post", path: "/users/{id}/reports", tag: "Reports", summary: "Report user", description: "Submits a confidential moderation report for an active user account.", auth: true, requestBody: true },
 
+  { method: "get", path: "/users/me/communities", tag: "Users", summary: "List my communities", description: "Lists the signed-in user's active or pending community memberships with unread message counts.", auth: true },
+  { method: "get", path: "/communities/{id}/rules", tag: "Communities", summary: "Get community rules", description: "Returns rules for a public community or an active private-community member.", auth: false },
+  { method: "put", path: "/communities/{id}/rules", tag: "Communities", summary: "Replace community rules", description: "Replaces ordered community rules and consequences for an owner or moderator.", auth: true, requestBody: true },
+  { method: "get", path: "/communities/{id}/settings", tag: "Communities", summary: "Get community settings", description: "Returns community messaging and membership settings to an active member.", auth: true },
+  { method: "patch", path: "/communities/{id}/settings", tag: "Communities", summary: "Update community settings", description: "Updates join, messaging, posting, invite, and member-list settings for an owner or moderator.", auth: true, requestBody: true },
+  { method: "patch", path: "/communities/{id}/members/{userId}", tag: "Communities", summary: "Update community member", description: "Updates an eligible member's role or active/removed status after moderator authorization.", auth: true, requestBody: true },
+  { method: "delete", path: "/communities/{id}/members/{userId}", tag: "Communities", summary: "Remove community member", description: "Removes an eligible member after owner or moderator authorization.", auth: true },
+  { method: "put", path: "/communities/{id}/bans/{userId}", tag: "Communities", summary: "Ban community member", description: "Bans an eligible user from a community with an optional expiry.", auth: true, requestBody: true },
+  { method: "delete", path: "/communities/{id}/bans/{userId}", tag: "Communities", summary: "Unban community member", description: "Changes a banned member to removed after moderator authorization.", auth: true },
+  { method: "post", path: "/communities/{id}/join-requests", tag: "Communities", summary: "Request community membership", description: "Joins an open free public community or creates a pending request for an approval community.", auth: true, requestBody: true },
+  { method: "post", path: "/communities/{id}/invites", tag: "Communities", summary: "Create community invite", description: "Creates a short-lived, hashed, use-limited invite token for an owner or moderator.", auth: true, requestBody: true },
+  { method: "get", path: "/communities/{id}/join-requests", tag: "Communities", summary: "List community join requests", description: "Lists join requests for an owner or moderator review queue.", auth: true },
+  { method: "patch", path: "/communities/{id}/join-requests/{requestId}", tag: "Communities", summary: "Review community join request", description: "Approves or rejects a pending request for an owner or moderator.", auth: true, requestBody: true },
+  { method: "delete", path: "/communities/{id}/join-requests/me", tag: "Communities", summary: "Cancel my join request", description: "Cancels the signed-in user's pending request.", auth: true },
+  { method: "post", path: "/communities/{id}/calls", tag: "Communities", summary: "Start community call", description: "Starts a voice or video call for an owner or moderator.", auth: true, requestBody: true },
+  { method: "get", path: "/communities/{id}/calls/active", tag: "Communities", summary: "Get active community call", description: "Returns the active community call or null for an active member.", auth: true },
+  { method: "post", path: "/communities/{id}/calls/{callId}/join", tag: "Communities", summary: "Join community call", description: "Returns a short-lived server-issued LiveKit participant token for an active member.", auth: true },
+  { method: "delete", path: "/communities/{id}/calls/{callId}", tag: "Communities", summary: "End community call", description: "Ends an active call for its starter, owner, or moderator.", auth: true },  { method: "post", path: "/communities/{id}/ownership-transfer", tag: "Communities", summary: "Transfer community ownership", description: "Transfers ownership to an active member; an optional current-password confirmation is validated when supplied.", auth: true, requestBody: true },
+  { method: "put", path: "/communities/{id}/messages/read", tag: "Communities", summary: "Mark community messages read", description: "Records the signed-in active member's last-read community message.", auth: true, requestBody: true },
+  { method: "patch", path: "/communities/{id}/notification-preferences/me", tag: "Communities", summary: "Update community notification preferences", description: "Updates the signed-in active member's community notification level.", auth: true, requestBody: true },
+  { method: "patch", path: "/communities/{id}/announcements/{announcementId}", tag: "Communities", summary: "Edit community announcement", description: "Edits or pins an announcement for an owner or moderator.", auth: true, requestBody: true },
+  { method: "delete", path: "/communities/{id}/announcements/{announcementId}", tag: "Communities", summary: "Delete community announcement", description: "Soft-deletes an announcement for an owner or moderator.", auth: true },  { method: "patch", path: "/communities/{id}/messages/{messageId}", tag: "Communities", summary: "Edit community message", description: "Edits a message for its author or an authorized community moderator.", auth: true, requestBody: true },
+  { method: "delete", path: "/communities/{id}/messages/{messageId}", tag: "Communities", summary: "Delete community message", description: "Soft-deletes a message for its author or an authorized community moderator.", auth: true },
+  { method: "put", path: "/communities/{id}/messages/{messageId}/reactions/{emoji}", tag: "Communities", summary: "Add community reaction", description: "Adds the active member's reaction to a community message.", auth: true },
+  { method: "delete", path: "/communities/{id}/messages/{messageId}/reactions/{emoji}", tag: "Communities", summary: "Remove community reaction", description: "Removes the active member's reaction from a community message.", auth: true },
+  { method: "put", path: "/communities/{id}/messages/{messageId}/pin", tag: "Communities", summary: "Pin community message", description: "Pins a community message for an owner or moderator.", auth: true },
+  { method: "delete", path: "/communities/{id}/messages/{messageId}/pin", tag: "Communities", summary: "Unpin community message", description: "Unpins a community message for an owner or moderator.", auth: true },
+  { method: "patch", path: "/communities/{id}/posts/{postId}", tag: "Communities", summary: "Edit community post", description: "Edits a post for its author or an authorized community moderator.", auth: true, requestBody: true },
+  { method: "delete", path: "/communities/{id}/posts/{postId}", tag: "Communities", summary: "Delete community post", description: "Soft-deletes a post for its author or an authorized community moderator.", auth: true },
   { method: "get", path: "/events", tag: "Events", summary: "List events", description: "Lists upcoming published events and sorts nearest-first when coordinates or a saved user location are available.", auth: false },
   { method: "get", path: "/events/recommended", tag: "Events", summary: "Get personalized nearby events", description: "Uses geospatial distance, profile interests, paid-event history, popularity, and freshness to rank upcoming events.", auth: true },
   { method: "get", path: "/events/created/me", tag: "Events", summary: "List my created events", description: "Returns every event created by the signed-in user.", auth: true },
@@ -62,6 +92,7 @@ export const apiEndpoints: EndpointDefinition[] = [
   { method: "post", path: "/communities/{id}/announcements", tag: "Communities", summary: "Create community announcement", description: "Allows only the owner or a moderator to publish an announcement.", auth: true, requestBody: true },
   { method: "get", path: "/communities/{id}/messages", tag: "Communities", summary: "List community messages", description: "Returns paginated member-room message history with author profiles.", auth: true },
   { method: "post", path: "/communities/{id}/messages", tag: "Communities", summary: "Send community message", description: "Creates an idempotent member-room message and emits it to the community socket room.", auth: true, requestBody: true },
+  { method: "post", path: "/communities/{id}/messages/{messageId}/reports", tag: "Reports", summary: "Report community message", description: "Confidentially reports one other member message from an active community member.", auth: true, requestBody: true },
   { method: "post", path: "/communities/{id}/reports", tag: "Reports", summary: "Report community", description: "Submits a confidential moderation report for an accessible community.", auth: true, requestBody: true },
 
   { method: "get", path: "/friends", tag: "Friends", summary: "List friends", description: "Lists accepted friendships with stable user IDs and safe requester/addressee profiles.", auth: true },
@@ -111,6 +142,7 @@ export const apiEndpoints: EndpointDefinition[] = [
   { method: "post", path: "/wallet/withdrawals", tag: "Wallet", summary: "Withdraw through Paystack", description: "Reserves the requested amount atomically, deducts the configured withdrawal fee from the payout, and initiates a referenced Paystack transfer.", auth: true, idempotency: true, requestBody: true },
   { method: "post", path: "/wallet/withdrawals/{reference}/finalize", tag: "Wallet", summary: "Finalize withdrawal OTP", description: "Finalizes a user-owned transfer only when Paystack requires OTP.", auth: true, requestBody: true },
 
+  { method: "post", path: "/uploads/files", tag: "Uploads", summary: "Upload community file", description: "Uploads one authenticated MIME-checked image, PDF, or document attachment for a community message.", auth: true, requestBody: true },
   { method: "post", path: "/uploads/images", tag: "Uploads", summary: "Upload image", description: "Uploads one authenticated JPEG, PNG, or WebP image through memory storage to Cloudinary.", auth: true, requestBody: true },
   { method: "post", path: "/webhooks/paystack", tag: "Webhooks", summary: "Receive Paystack webhook", description: "Verifies HMAC-SHA512 over the raw body, deduplicates events, and applies idempotent wallet transitions.", auth: false, requestBody: true },
 ];

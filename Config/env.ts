@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import { z } from "zod";
 
 const durationPattern = /^\d+(s|m|h|d)$/;
@@ -47,6 +47,11 @@ const envSchema = z.object({
   GROQ_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(100).max(4000).default(800),
   EXPO_ACCESS_TOKEN: z.string().optional().default(""),
   MAX_IMAGE_SIZE_BYTES: z.coerce.number().int().positive().default(5242880),
+  MAX_COMMUNITY_FILE_SIZE_BYTES: z.coerce.number().int().positive().max(26214400).default(10485760),
+  LIVEKIT_URL: z.string().url().or(z.literal("")).default(""),
+  LIVEKIT_API_KEY: z.string().optional().default(""),
+  LIVEKIT_API_SECRET: z.string().optional().default(""),
+  CALL_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(600),
   JSON_BODY_LIMIT: z.string().default("100kb"),
   BOOTSTRAP_ADMIN_EMAIL: z.string().email().or(z.literal("")).optional().default(""),
   ADMIN_SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),

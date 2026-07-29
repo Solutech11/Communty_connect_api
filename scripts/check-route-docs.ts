@@ -31,7 +31,7 @@ const main = async (): Promise<void> => {
 
   for (const file of routeFiles) {
     const source = await fs.readFile(file, "utf8");
-    routeCount += [...source.matchAll(/router\.(get|post|patch|delete)\s*\(/g)].length;
+    routeCount += [...source.matchAll(/router\.(get|post|put|patch|delete)\s*\(/g)].length;
   }
 
   const keys = apiEndpoints.map((endpoint) => `${endpoint.method.toUpperCase()} ${endpoint.path}`);

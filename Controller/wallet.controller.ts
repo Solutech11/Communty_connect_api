@@ -161,6 +161,8 @@ export const verifyTopup = async (request: Request, response: Response): Promise
 
   const provider = await verifyPaystackTransaction((request.params.reference as string));
 
+  console.log(provider);  
+
   const totalPayableKobo = transaction.amountKobo + (transaction.feeKobo || 0);
 
   if (provider.status !== "success" || provider.amount !== totalPayableKobo) {

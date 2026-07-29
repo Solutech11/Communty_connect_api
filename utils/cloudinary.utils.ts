@@ -38,3 +38,29 @@ export const uploadImage = async (
     stream.end(buffer);
   });
 };
+
+export const uploadCommunityFile = async (
+  buffer: Buffer,
+  mimeType: string,
+): Promise<{ url: string; publicId: string }> => {
+  const resourceType = mimeType.startsWith("image/") ? "image" : "raw";
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "community-connect/community-chat",
+        resource_type: resourceType,
+        overwrite: false,
+        unique_filename: true,
+        use_filename: false,
+      },
+      (error, result) => {
+        if (error || !result) {
+          reject(new AppError(502, "File upload failed", "CLOUDINARY_UPLOAD_FAILED"));
+          return;
+        }
+        resolve({ url: result.secure_url, publicId: result.public_id });
+      },
+    );
+    stream.end(buffer);
+  });
+};

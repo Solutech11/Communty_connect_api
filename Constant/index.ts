@@ -1,6 +1,17 @@
 export const USER_ROLES = ["member", "moderator", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
+export const USER_PREFERRED_SETTINGS = ["indoor", "outdoor"] as const;
+export type UserPreferredSetting = (typeof USER_PREFERRED_SETTINGS)[number];
+
+export const USER_PREFERRED_GROUP_SIZES = ["small", "medium", "large"] as const;
+export type UserPreferredGroupSize = (typeof USER_PREFERRED_GROUP_SIZES)[number];
+
+// This is a personalization preference only. Authorization continues to use
+// USER_ROLES and must never depend on this value.
+export const USER_PARTICIPATION_ROLES = ["participant", "organizer"] as const;
+export type UserParticipationRole = (typeof USER_PARTICIPATION_ROLES)[number];
+
 export const EVENT_STATUSES = [
   "draft",
   "pending_approval",

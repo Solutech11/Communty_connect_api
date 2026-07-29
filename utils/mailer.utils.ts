@@ -30,12 +30,13 @@ export const sendEmail = async (input: {
       {
         timeout: 15_000,
         headers: {
-          Authorization: `Zoho-enczapikey ${env.ZEPTOMAIL_SEND_MAIL_TOKEN}`,
+          Authorization: `${env.ZEPTOMAIL_SEND_MAIL_TOKEN}`,
           "Content-Type": "application/json",
         },
       },
     );
-  } catch {
+  } catch(error) {
+    console.log(error);
     throw new AppError(502, "Email could not be sent", "EMAIL_PROVIDER_UNAVAILABLE");
   }
 };

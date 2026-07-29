@@ -1,6 +1,8 @@
-import type { Namespace, Socket } from "socket.io";
+﻿import type { Namespace, Socket } from "socket.io";
 import { z } from "zod";
 import { ConversationModel } from "../../models/Chat/Conversation.model";
+import { requireActiveCommunityMember } from "../../utils/communityAccess.utils";
+import { UserModel } from "../../models/Auth/User.model";
 import { logger } from "../../utils/logger.utils";
 
 const conversationIdSchema = z.string().regex(/^[a-f\d]{24}$/i, "Invalid conversation ID");
@@ -10,6 +12,8 @@ type ObjectAcknowledgement = (result: {
   success: boolean;
   message: string;
   conversationId?: string;
+  communityId?: string;
+  code?: string;
 }) => void;
 
 const getConversationId = (payload: unknown): string | null => {
@@ -168,6 +172,54 @@ const ChatSocket = (socket: Socket, io: Namespace): void => {
     emitTypingState(payload, false);
   });
 
+  const communityIdSchema = z.string().regex(/^[a-fd]{24}$/i, "Invalid community ID");
+  const parseCommunityId = (payload: unknown): string | null => {
+    const value = typeof payload === "object" && payload !== null && "communityId" in payload
+      ? (payload as { communityId?: unknown }).communityId
+      : null;
+    const parsed = communityIdSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  };
+
+  socket.on("community:join", async (payload: unknown, acknowledge?: ObjectAcknowledgement): Promise<void> => {
+    const communityId = parseCommunityId(payload);
+    if (!communityId) {
+      acknowledge?.({ success: false, code: "VALIDATION_ERROR", message: "A valid community ID is required" });
+      return;
+    }
+    try {
+      await requireActiveCommunityMember(communityId, userId);
+      await socket.join("community:" + communityId);
+      acknowledge?.({ success: true, message: "Community joined", communityId });
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String((error as { code?: string }).code) : "COMMUNITY_MEMBER_REQUIRED";
+      acknowledge?.({ success: false, code, message: "An active community membership is required" });
+    }
+  });
+
+  socket.on("community:leave", async (payload: unknown, acknowledge?: ObjectAcknowledgement): Promise<void> => {
+    const communityId = parseCommunityId(payload);
+    if (!communityId) {
+      acknowledge?.({ success: false, code: "VALIDATION_ERROR", message: "A valid community ID is required" });
+      return;
+    }
+    await socket.leave("community:" + communityId);
+    acknowledge?.({ success: true, message: "Community left", communityId });
+  });
+
+  socket.on("community:typing", async (payload: unknown): Promise<void> => {
+    const communityId = parseCommunityId(payload);
+    const typing = typeof payload === "object" && payload !== null
+      && (payload as { typing?: unknown }).typing === true;
+    if (!communityId || !socket.rooms.has("community:" + communityId)) return;
+    const user = await UserModel.findById(userId).select("firstName").lean();
+    socket.to("community:" + communityId).emit("community:typing", {
+      communityId,
+      userId,
+      firstName: user?.firstName || "Member",
+      typing,
+    });
+  });
   socket.on("disconnect", (reason) => {
     logger.debug(
       {

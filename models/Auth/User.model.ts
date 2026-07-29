@@ -1,5 +1,14 @@
 ﻿import { Schema, model, models, type HydratedDocument, type Model } from "mongoose";
-import { USER_ROLES, type UserRole } from "../../Constant";
+import {
+  USER_PARTICIPATION_ROLES,
+  USER_PREFERRED_GROUP_SIZES,
+  USER_PREFERRED_SETTINGS,
+  USER_ROLES,
+  type UserParticipationRole,
+  type UserPreferredGroupSize,
+  type UserPreferredSetting,
+  type UserRole,
+} from "../../Constant";
 
 export interface User {
   firstName: string;
@@ -17,6 +26,10 @@ export interface User {
   lga?: string;
   location?: { type: "Point"; coordinates: [number, number] };
   interests: string[];
+  preferredSetting: UserPreferredSetting;
+  preferredGroupSize: UserPreferredGroupSize;
+  participationRole: UserParticipationRole;
+  hobbies: string[];
   expoPushTokens: string[];
   tokenVersion: number;
   lastLoginAt?: Date;
@@ -61,6 +74,22 @@ const userSchema = new Schema<User>(
       default: undefined,
     },
     interests: [{ type: String, trim: true, maxlength: 40 }],
+    preferredSetting: {
+      type: String,
+      enum: USER_PREFERRED_SETTINGS,
+      default: "indoor",
+    },
+    preferredGroupSize: {
+      type: String,
+      enum: USER_PREFERRED_GROUP_SIZES,
+      default: "medium",
+    },
+    participationRole: {
+      type: String,
+      enum: USER_PARTICIPATION_ROLES,
+      default: "participant",
+    },
+    hobbies: [{ type: String, trim: true, maxlength: 40 }],
     expoPushTokens: [{ type: String, select: false }],
     tokenVersion: { type: Number, default: 0, select: true },
     lastLoginAt: { type: Date },

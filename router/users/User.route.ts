@@ -1,15 +1,23 @@
 import { Router } from "express";
 import { z } from "zod";
 import {
+  USER_PARTICIPATION_ROLES,
+  USER_PREFERRED_GROUP_SIZES,
+  USER_PREFERRED_SETTINGS,
+} from "../../Constant";
+import {
   changePassword,
   deleteAccount,
   getProfile,
   registerPushToken,
   removePushToken,
   updateProfile,
+  updateProfileAvatar,
 } from "../../Controller/user.controller";
 import { createTargetReport } from "../../Controller/report.controller";
+import { listMyCommunities } from "../../Controller/communityManagement.controller";
 import { authenticate } from "../../middleware/auth.middleware";
+import { imageUpload } from "../../middleware/imageUpload.middleware";
 import { validate } from "../../middleware/validate.middleware";
 import { idParamsSchema, passwordSchema } from "../../schemas/common.schemas";
 import { reportBodySchema } from "../../schemas/report.schemas";
@@ -28,6 +36,20 @@ const geoPoint = z.object({
 
 router.use(authenticate);
 router.get("/me", asyncHandler(getProfile));
+router.get(
+  "/me/communities",
+  validate({
+    query: z.object({
+      page: z.coerce.number().int().min(1).max(10_000).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      search: z.string().trim().max(100).optional(),
+      role: z.enum(["owner", "moderator", "member"]).optional(),
+      status: z.enum(["pending", "active"]).optional(),
+      unreadOnly: z.enum(["true", "false"]).optional(),
+    }).strict(),
+  }),
+  asyncHandler(listMyCommunities),
+);
 router.post(
   "/:id/reports",
   validate({ params: idParamsSchema, body: reportBodySchema }),
@@ -47,9 +69,19 @@ router.patch(
       lga: z.string().trim().max(100).optional(),
       location: geoPoint.optional(),
       interests: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+      preferredSetting: z.enum(USER_PREFERRED_SETTINGS).optional(),
+      preferredGroupSize: z.enum(USER_PREFERRED_GROUP_SIZES).optional(),
+      // This field personalizes the experience and does not grant permissions.
+      participationRole: z.enum(USER_PARTICIPATION_ROLES).optional(),
+      hobbies: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
     }).strict().refine((value) => Object.keys(value).length > 0),
   }),
   asyncHandler(updateProfile),
+);
+router.patch(
+  "/me/avatar",
+  imageUpload.single("image"),
+  asyncHandler(updateProfileAvatar),
 );
 router.patch(
   "/me/password",

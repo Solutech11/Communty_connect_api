@@ -54,3 +54,14 @@ test("event and community contracts expose stored image URLs", () => {
   const community = communityData.community as Record<string, unknown>;
   assert.equal(typeof community.imageUrl, "string");
 });
+test("profile contracts expose connection/event totals and profile-photo updates", () => {
+  const profileData = dataFor("GET /users/me");
+  const totals = profileData.totals as Record<string, unknown>;
+
+  assert.equal(typeof totals.connections, "number");
+  assert.equal(typeof totals.events, "number");
+
+  const avatarData = dataFor("PATCH /users/me/avatar");
+  const avatarUser = avatarData.user as Record<string, unknown>;
+  assert.equal(typeof avatarUser.avatarUrl, "string");
+});

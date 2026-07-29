@@ -3,17 +3,35 @@ import type { Request, Response } from "express";
 import { env } from "../Config/env";
 import { RefreshTokenModel } from "../models/Auth/RefreshToken.model";
 import { UserModel } from "../models/Auth/User.model";
+import { EventModel } from "../models/Event/Event.model";
+import { FriendshipModel } from "../models/Social/Friendship.model";
 import { AppError } from "../utils/AppError";
 import { sendSuccess } from "../utils/response.utils";
+import { uploadImage } from "../utils/cloudinary.utils";
 
 export const getProfile = async (request: Request, response: Response): Promise<Response> => {
-  const user = await UserModel.findById(request.auth?.id);
+  const userId = request.auth?.id;
+  const [user, totalConnections, totalEvents] = await Promise.all([
+    UserModel.findById(userId),
+    FriendshipModel.countDocuments({
+      status: "accepted",
+      $or: [{ requesterId: userId }, { addresseeId: userId }],
+    }),
+    EventModel.countDocuments({ creatorId: userId }),
+  ]);
 
   if (!user) {
     throw new AppError(404, "Profile was not found", "PROFILE_NOT_FOUND");
   }
 
-  return sendSuccess(response, 200, "Profile retrieved", { user });
+  return sendSuccess(response, 200, "Profile retrieved", {
+    user,
+    totals: {
+      connections: totalConnections,
+      // Includes every event created by the user, regardless of lifecycle status.
+      events: totalEvents,
+    },
+  });
 };
 
 export const updateProfile = async (request: Request, response: Response): Promise<Response> => {
@@ -28,6 +46,26 @@ export const updateProfile = async (request: Request, response: Response): Promi
   }
 
   return sendSuccess(response, 200, "Profile updated", { user });
+};
+
+export const updateProfileAvatar = async (
+  request: Request,
+  response: Response,
+): Promise<Response> => {
+  if (!request.file) {
+    throw new AppError(400, "A profile image file is required", "IMAGE_REQUIRED");
+  }
+
+  const user = await UserModel.findById(request.auth?.id);
+  if (!user) {
+    throw new AppError(404, "Profile was not found", "PROFILE_NOT_FOUND");
+  }
+
+  const uploadedImage = await uploadImage(request.file.buffer, "avatars");
+  user.avatarUrl = uploadedImage.url;
+  await user.save();
+
+  return sendSuccess(response, 200, "Profile photo updated", { user });
 };
 
 export const changePassword = async (request: Request, response: Response): Promise<Response> => {
@@ -87,6 +125,10 @@ export const deleteAccount = async (request: Request, response: Response): Promi
   user.bio = undefined;
   user.avatarUrl = undefined;
   user.interests = [];
+  user.preferredSetting = "indoor";
+  user.preferredGroupSize = "medium";
+  user.participationRole = "participant";
+  user.hobbies = [];
   user.expoPushTokens = [];
   user.status = "deleted";
   user.deletedAt = new Date();

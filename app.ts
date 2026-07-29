@@ -40,10 +40,34 @@ app.use(requestContext);
 app.use(
   pinoHttp({
     logger,
-    autoLogging: {
-      ignore: (request) => request.url === "/health",
+    // Emit a received and completed entry for every request, including health
+    // checks, so operators can trace whether a client request reached the API.
+    autoLogging: true,
+    customReceivedMessage: () => "Request received",
+    customSuccessMessage: () => "Request sent",
+    customErrorMessage: () => "Request failed",
+    customLogLevel: (_request, response, error) => {
+      if (error || response.statusCode >= 500) {
+        return "error";
+      }
+
+      if (response.statusCode >= 400) {
+        return "warn";
+      }
+
+      return "info";
     },
-    customProps: (request) => ({ requestId: request.id }),
+    // Never log headers, query parameters, or request bodies. They can contain
+    // credentials, tokens, or private client data and are not needed to trace
+    // delivery of a request.
+    serializers: {
+      req: (request) => ({
+        method: request.method,
+        url: request.url?.split("?")[0],
+      }),
+      res: (response) => ({ statusCode: response.statusCode }),
+    },
+    customProps: (request) => ({ requestId: request.requestId }),
   }),
 );
 app.use(securityMiddleware);

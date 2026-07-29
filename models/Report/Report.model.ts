@@ -1,18 +1,18 @@
-import { Schema, model, models, type InferSchemaType, type Model } from "mongoose";
+﻿import { Schema, model, models, type InferSchemaType, type Model } from "mongoose";
 
 const reportSchema = new Schema(
   {
     reporterId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     targetType: {
       type: String,
-      enum: ["event", "community", "user"],
+      enum: ["event", "community", "user", "community_message"],
       required: true,
       index: true,
     },
     targetId: { type: Schema.Types.ObjectId, required: true, index: true },
     reason: {
       type: String,
-      enum: ["spam", "harassment", "hate", "violence", "scam", "unsafe", "misinformation", "other"],
+      enum: ["spam", "harassment", "hate", "hate_speech", "violence", "scam", "unsafe", "inappropriate", "misinformation", "other"],
       required: true,
       index: true,
     },
