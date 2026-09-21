@@ -120,14 +120,14 @@ or admin permissions. `PATCH /users/me` accepts these fields together with
 | GET | `/events/created/me` | Yes | List my created events |
 | GET | `/events/{id}` | Conditional | Get event and active ticket types; draft is owner-only |
 | POST | `/events` | Yes | Create event draft |
-| PATCH | `/events/{id}` | Yes | Update owned draft |
+| PATCH | `/events/{id}` | Yes | Update owned draft or declined event (editing a decline returns it to draft) |
 | POST | `/events/{id}/orders` | Yes + key | Reserve inventory and initialize paid/free ticket checkout |
-| POST | `/events/{id}/publish` | Yes | Validate and submit owned event for admin approval |
+| POST | `/events/{id}/publish` | Yes | Immediately review content, pricing, and cover image with Groq; publish safe events or return actionable rejection reasons |
 | POST | `/events/{id}/cancel` | Yes | Cancel owned event |
-| DELETE | `/events/{id}` | Yes | Delete owned draft |
-| POST | `/events/{id}/ticket-types` | Yes | Add ticket type (maximum 10) |
-| PATCH | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Update unsold ticket type |
-| DELETE | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Deactivate unsold ticket type |
+| DELETE | `/events/{id}` | Yes | Delete owned draft or declined event |
+| POST | `/events/{id}/ticket-types` | Yes | Add ticket type (maximum 10) to a draft or declined event |
+| PATCH | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Update unsold ticket type on a draft or declined event |
+| DELETE | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Deactivate unsold ticket type on a draft or declined event |
 | GET | `/events/{id}/attendees` | Yes | Owner attendee list with check-in flags, timestamps, and count summary |
 | POST | `/events/{id}/check-ins` | Yes | Owner QR validation and one-time check-in |
 | POST | `/events/{id}/reports` | Yes | Report a published event for moderation |
@@ -274,7 +274,7 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 - The portal is sectioned into moderation, members, administrator team, and revenue areas. Administrators with `admins:manage` can create active verified administrator accounts; their passwords are hashed before storage.
 - Administrators with `users:moderate` can block active non-admin accounts. Blocking revokes refresh sessions immediately; unblocking restores the member account. Administrator accounts cannot be blocked through the portal.
 - Admin browser sessions are hashed in MongoDB, expire automatically, bind to IP and user agent, use secure HttpOnly SameSite cookies, and require CSRF tokens for every action.
-- Events submitted through `POST /events/{id}/publish` remain `pending_approval` until approved in the portal. Published events can be deactivated with a recorded reason.
+- `POST /events/{id}/publish` runs immediate Groq moderation over event details, ticket-price consistency, and the authenticated Cloudinary cover image. Safe events are published automatically. Declined events retain category-specific reasons, email the organizer, and can be corrected and resubmitted. If the provider is unavailable, the event remains `pending_approval` for manual portal review. Published events can be deactivated with a recorded reason.
 - Platform percentages are configured as integer basis points: `DEPOSIT_CHARGE_BPS`, `WITHDRAWAL_CHARGE_BPS`, `TICKET_CHARGE_BPS`, and `COMMUNITY_CHARGE_BPS`.
 - Deposit fees are added to the desired wallet credit; withdrawal fees are deducted from the requested payout; ticket fees are added as a service fee; premium-community fees are retained from owner proceeds.
 - Earnings are recognized only inside the same Mongo transaction that completes the verified payment or successful withdrawal. The immutable source reference prevents duplicate earnings.
@@ -312,7 +312,7 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 
 ## External Provider Notes
 
-- Groq powers generative AI through `openai/gpt-oss-20b` by default. Short AI session context is encrypted at rest; nearby-event ranking remains local and does not spend model tokens.
+- Groq powers generative AI through `openai/gpt-oss-20b` by default and uses `qwen/qwen3.8-27b` for event moderation with cover-image vision. Event moderation receives only the event public listing data and ticket definitions; short AI session context is encrypted at rest; nearby-event ranking remains local and does not spend model tokens.
 - Expo sends in batches of at most 100, accepts optional enhanced-security access tokens, and records ticket IDs. A production worker should fetch push receipts about 15 minutes later and remove `DeviceNotRegistered` tokens.
 - ZeptoMail payloads are sent server-to-server using the configured send-mail token.
 - Cloudinary receives only authenticated, MIME-checked, size-limited in-memory image uploads.

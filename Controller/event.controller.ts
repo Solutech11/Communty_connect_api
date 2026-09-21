@@ -1,12 +1,19 @@
 import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
 import { getPersonalizedEventRecommendations } from "../Community_AI/EventRecommendation.algorithm";
+import {
+  isModeratableEventImageUrl,
+  markUnreviewableEventImage,
+  moderateEventWithGroq,
+} from "../Community_AI/Groq";
 import { UserModel } from "../models/Auth/User.model";
 import { EventModel } from "../models/Event/Event.model";
 import { TicketOrderModel } from "../models/Event/TicketOrder.model";
 import { TicketTypeModel } from "../models/Event/TicketType.model";
 import { AppError } from "../utils/AppError";
 import { sha256 } from "../utils/crypto.utils";
+import { eventModerationEmailTemplate, sendEmail } from "../utils/mailer.utils";
+import { logger } from "../utils/logger.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const createSlug = (title: string): string => {
@@ -149,7 +156,10 @@ export const getEvent = async (request: Request, response: Response): Promise<Re
     "firstName lastName avatarUrl bio",
   );
 
+  // console.log("Event retrieved:", event);
   const isOwner = event?.creatorId._id.toString() === request.auth?.id;
+
+  console.log("Is owner:", isOwner, "Event creator ID:", event?.creatorId._id.toString(), "Request auth ID:", request.auth?.id);
   const isAdmin = request.auth?.role === "admin";
 
   if (!event || (event.status !== "published" && !isOwner && !isAdmin)) {
@@ -181,11 +191,31 @@ const requireOwnedEvent = async (eventId: string, userId: string) => {
   return event;
 };
 
+type OwnedEvent = Awaited<ReturnType<typeof requireOwnedEvent>>;
+
+const isEventEditable = (event: OwnedEvent): boolean => {
+  return event.status === "draft" || event.status === "rejected";
+};
+
+// A declined event must return to a clean draft before an organizer corrects
+// it. Its old reasons cannot be mistaken for a review of newly edited content.
+const resetRejectedEventForEditing = (event: OwnedEvent): void => {
+  if (event.status !== "rejected") {
+    return;
+  }
+
+  event.status = "draft";
+  event.set("submittedAt", undefined);
+  event.set("moderation", undefined);
+  event.set("approvedAt", undefined);
+  event.set("publishedAt", undefined);
+};
+
 export const updateEvent = async (request: Request, response: Response): Promise<Response> => {
   const event = await requireOwnedEvent((request.params.id as string), request.auth?.id as string);
 
-  if (event.status !== "draft") {
-    throw new AppError(409, "Only draft events can be fully edited", "EVENT_NOT_EDITABLE");
+  if (!isEventEditable(event)) {
+    throw new AppError(409, "Only draft or declined events can be edited", "EVENT_NOT_EDITABLE");
   }
 
   event.set(request.body);
@@ -194,15 +224,16 @@ export const updateEvent = async (request: Request, response: Response): Promise
     throw new AppError(422, "End date must be after start date", "INVALID_EVENT_DATES");
   }
 
+  resetRejectedEventForEditing(event);
   await event.save();
   return sendSuccess(response, 200, "Event updated", { event });
 };
 
 export const publishEvent = async (request: Request, response: Response): Promise<Response> => {
   const event = await requireOwnedEvent((request.params.id as string), request.auth?.id as string);
-  const ticketCount = await TicketTypeModel.countDocuments({ eventId: event._id, active: true });
+  const ticketTypes = await TicketTypeModel.find({ eventId: event._id, active: true }).lean();
 
-  if (ticketCount === 0) {
+  if (ticketTypes.length === 0) {
     throw new AppError(422, "Add at least one ticket type before publishing", "TICKET_TYPE_REQUIRED");
   }
 
@@ -211,13 +242,135 @@ export const publishEvent = async (request: Request, response: Response): Promis
   }
 
   if (event.status !== "draft" && event.status !== "rejected") {
-    throw new AppError(409, "Only a draft can be submitted for approval", "EVENT_NOT_SUBMITTABLE");
+    throw new AppError(409, "Only a draft or declined event can be submitted", "EVENT_NOT_SUBMITTABLE");
   }
 
-  event.status = "pending_approval";
-  event.submittedAt = new Date();
-  await event.save();
-  return sendSuccess(response, 200, "Event submitted for admin approval", { event });
+  // Claim the review transition before calling Groq so duplicate client taps
+  // cannot result in two provider calls or competing publish decisions.
+  const submittedAt = new Date();
+  const pendingEvent = await EventModel.findOneAndUpdate(
+    {
+      _id: event._id,
+      creatorId: request.auth?.id,
+      status: { $in: ["draft", "rejected"] },
+    },
+    {
+      $set: { status: "pending_approval", submittedAt },
+      $unset: { moderation: 1, approvedAt: 1, approvedBy: 1, publishedAt: 1 },
+    },
+    { new: true, runValidators: true },
+  );
+
+  if (!pendingEvent) {
+    throw new AppError(409, "Event is already being reviewed or is no longer submittable", "EVENT_NOT_SUBMITTABLE");
+  }
+
+  const imageReviewStatus = !pendingEvent.coverImageUrl
+    ? "not_provided"
+    : isModeratableEventImageUrl(pendingEvent.coverImageUrl)
+      ? "included"
+      : "unreviewable";
+
+  try {
+    let moderation = await moderateEventWithGroq({
+      title: pendingEvent.title,
+      description: pendingEvent.description,
+      activityType: pendingEvent.activityType,
+      targetAudience: pendingEvent.targetAudience ?? undefined,
+      setting: pendingEvent.setting,
+      country: pendingEvent.country,
+      state: pendingEvent.state,
+      lga: pendingEvent.lga,
+      venueName: pendingEvent.venueName,
+      address: pendingEvent.address,
+      startsAt: pendingEvent.startsAt.toISOString(),
+      endsAt: pendingEvent.endsAt.toISOString(),
+      maxCapacity: pendingEvent.maxCapacity,
+      tags: pendingEvent.tags,
+      coverImageUrl: imageReviewStatus === "included"
+        ? pendingEvent.coverImageUrl ?? undefined
+        : undefined,
+      imageReviewStatus,
+      ticketTypes: ticketTypes.map((ticketType) => ({
+        title: ticketType.title,
+        description: ticketType.description ?? undefined,
+        priceKobo: ticketType.priceKobo,
+        capacity: ticketType.capacity ?? undefined,
+      })),
+    });
+
+    if (imageReviewStatus === "unreviewable") {
+      moderation = markUnreviewableEventImage(moderation);
+    }
+
+    const reviewedAt = new Date();
+    const approved = moderation.verdict === "approved";
+    const reviewedEvent = await EventModel.findOneAndUpdate(
+      { _id: pendingEvent._id, status: "pending_approval" },
+      {
+        $set: {
+          status: approved ? "published" : "rejected",
+          moderation: {
+            provider: "groq",
+            model: moderation.model,
+            verdict: moderation.verdict,
+            reviewedAt,
+            reasons: moderation.reasons,
+            checks: moderation.checks,
+          },
+          ...(approved ? { approvedAt: reviewedAt, publishedAt: reviewedAt } : {}),
+        },
+        $unset: approved ? { approvedBy: 1 } : { approvedAt: 1, approvedBy: 1, publishedAt: 1 },
+      },
+      { new: true, runValidators: true },
+    );
+
+    if (!reviewedEvent) {
+      const currentEvent = await EventModel.findById(pendingEvent._id);
+      return sendSuccess(response, 200, "Event status changed while automatic review was running", {
+        event: currentEvent,
+      });
+    }
+
+    const organizer = await UserModel.findById(request.auth?.id).select("firstName email").lean();
+    if (organizer) {
+      try {
+        await sendEmail({
+          toEmail: organizer.email,
+          toName: organizer.firstName,
+          subject: approved ? "Your event is published" : "Action needed: update your event",
+          html: eventModerationEmailTemplate({
+            name: organizer.firstName,
+            eventTitle: reviewedEvent.title,
+            verdict: moderation.verdict,
+            reasons: moderation.reasons,
+          }),
+        });
+      } catch {
+        // A mail outage must not reverse a completed moderation decision.
+        logger.warn(
+          { operation: "event_moderation_email", eventId: reviewedEvent._id.toString() },
+          "Event moderation email could not be sent",
+        );
+      }
+    }
+
+    return sendSuccess(
+      response,
+      200,
+      approved ? "Event approved and published" : "Event declined after automatic review",
+      { event: reviewedEvent },
+    );
+  } catch (error) {
+    if (error instanceof AppError && error.code === "GROQ_MODERATION_UNAVAILABLE") {
+      // Fail closed: provider trouble can never turn a submission into a live event.
+      return sendSuccess(response, 202, "Event submitted for manual review because automatic review is unavailable", {
+        event: pendingEvent,
+      });
+    }
+
+    throw error;
+  }
 };
 
 export const cancelEvent = async (request: Request, response: Response): Promise<Response> => {
@@ -231,22 +384,23 @@ export const cancelEvent = async (request: Request, response: Response): Promise
 export const deleteDraftEvent = async (request: Request, response: Response): Promise<Response> => {
   const event = await requireOwnedEvent((request.params.id as string), request.auth?.id as string);
 
-  if (event.status !== "draft") {
-    throw new AppError(409, "Only draft events can be deleted", "EVENT_NOT_DELETABLE");
+  if (!isEventEditable(event)) {
+    throw new AppError(409, "Only draft or declined events can be deleted", "EVENT_NOT_DELETABLE");
   }
 
   await Promise.all([
     TicketTypeModel.deleteMany({ eventId: event._id }),
     event.deleteOne(),
   ]);
-  return sendSuccess(response, 200, "Event draft deleted");
+  return sendSuccess(response, 200, "Event deleted");
 };
 
 export const addTicketType = async (request: Request, response: Response): Promise<Response> => {
   const event = await requireOwnedEvent((request.params.id as string), request.auth?.id as string);
+  const wasRejected = event.status === "rejected";
 
-  if (event.status !== "draft") {
-    throw new AppError(409, "Ticket types can only be added to drafts", "EVENT_NOT_EDITABLE");
+  if (!isEventEditable(event)) {
+    throw new AppError(409, "Ticket types can only be changed on draft or declined events", "EVENT_NOT_EDITABLE");
   }
 
   const currentCount = await TicketTypeModel.countDocuments({ eventId: event._id, active: true });
@@ -256,11 +410,21 @@ export const addTicketType = async (request: Request, response: Response): Promi
   }
 
   const ticketType = await TicketTypeModel.create({ ...request.body, eventId: event._id });
+  if (wasRejected) {
+    resetRejectedEventForEditing(event);
+    await event.save();
+  }
   return sendSuccess(response, 201, "Ticket type created", { ticketType });
 };
 
 export const updateTicketType = async (request: Request, response: Response): Promise<Response> => {
   const event = await requireOwnedEvent((request.params.id as string), request.auth?.id as string);
+  const wasRejected = event.status === "rejected";
+
+  if (!isEventEditable(event)) {
+    throw new AppError(409, "Ticket types can only be changed on draft or declined events", "EVENT_NOT_EDITABLE");
+  }
+
   const ticketType = await TicketTypeModel.findOne({
     _id: (request.params.ticketTypeId as string),
     eventId: event._id,
@@ -271,12 +435,23 @@ export const updateTicketType = async (request: Request, response: Response): Pr
   }
 
   ticketType.set(request.body);
-  await ticketType.save();
+  if (wasRejected) {
+    resetRejectedEventForEditing(event);
+    await Promise.all([ticketType.save(), event.save()]);
+  } else {
+    await ticketType.save();
+  }
   return sendSuccess(response, 200, "Ticket type updated", { ticketType });
 };
 
 export const removeTicketType = async (request: Request, response: Response): Promise<Response> => {
   const event = await requireOwnedEvent((request.params.id as string), request.auth?.id as string);
+  const wasRejected = event.status === "rejected";
+
+  if (!isEventEditable(event)) {
+    throw new AppError(409, "Ticket types can only be changed on draft or declined events", "EVENT_NOT_EDITABLE");
+  }
+
   const result = await TicketTypeModel.updateOne(
     { _id: (request.params.ticketTypeId as string), eventId: event._id, sold: 0 },
     { active: false },
@@ -284,6 +459,11 @@ export const removeTicketType = async (request: Request, response: Response): Pr
 
   if (result.modifiedCount === 0) {
     throw new AppError(409, "This ticket type cannot be removed", "TICKET_NOT_REMOVABLE");
+  }
+
+  if (wasRejected) {
+    resetRejectedEventForEditing(event);
+    await event.save();
   }
 
   return sendSuccess(response, 200, "Ticket type removed");

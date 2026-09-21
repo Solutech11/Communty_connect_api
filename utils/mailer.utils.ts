@@ -35,8 +35,14 @@ export const sendEmail = async (input: {
         },
       },
     );
-  } catch(error) {
-    console.log(error);
+  } catch (error) {
+    logger.warn(
+      {
+        operation: "zeptomail_send_email",
+        providerStatus: axios.isAxiosError(error) ? error.response?.status : undefined,
+      },
+      "Email provider request failed",
+    );
     throw new AppError(502, "Email could not be sent", "EMAIL_PROVIDER_UNAVAILABLE");
   }
 };
@@ -49,6 +55,52 @@ export const otpEmailTemplate = (name: string, otp: string, purpose: string): st
       <p>Your ${purpose} code is:</p>
       <p style="font-size:28px;font-weight:700;letter-spacing:6px">${otp}</p>
       <p>This code expires in 10 minutes. If you did not request it, ignore this email.</p>
+    </div>
+  `;
+};
+import { logger } from "./logger.utils";
+
+const escapeHtml = (value: string): string => {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+};
+
+export const eventModerationEmailTemplate = (input: {
+  name: string;
+  eventTitle: string;
+  verdict: "approved" | "rejected";
+  reasons: string[];
+}): string => {
+  const safeName = escapeHtml(input.name);
+  const safeTitle = escapeHtml(input.eventTitle);
+
+  if (input.verdict === "approved") {
+    return `
+      <div style="font-family:Arial,sans-serif;color:#102018;line-height:1.6">
+        <h2>${escapeHtml(env.APP_NAME)}</h2>
+        <p>Hello ${safeName},</p>
+        <p>Your event <strong>${safeTitle}</strong> passed our automatic review and is now published.</p>
+        <p>We reviewed the event information, cover image where provided, ticket pricing, and Community Connect safety guidelines.</p>
+      </div>
+    `;
+  }
+
+  const reasonItems = input.reasons
+    .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+    .join("");
+
+  return `
+    <div style="font-family:Arial,sans-serif;color:#102018;line-height:1.6">
+      <h2>${escapeHtml(env.APP_NAME)}</h2>
+      <p>Hello ${safeName},</p>
+      <p>We could not publish <strong>${safeTitle}</strong> after its automatic review.</p>
+      <p>Please review the following items, update your event, and submit it again:</p>
+      <ul>${reasonItems}</ul>
+      <p>We check event information, cover images, ticket pricing, and our community safety guidelines. Sexual or explicit content, harmful or illegal activity, scams, and misleading information are not allowed.</p>
     </div>
   `;
 };

@@ -10,6 +10,7 @@ const testFiles = [
   "tests/recommendation.test.ts",
   "tests/security.test.ts",
   "tests/location.test.ts",
+  "tests/event-moderation.test.ts",
 ];
 
 const runTestFile = async (testFile: string): Promise<void> => {

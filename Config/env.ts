@@ -44,6 +44,7 @@ const envSchema = z.object({
   GROQ_API_KEY: z.string().min(1),
   GROQ_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
   GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-20b"),
+  GROQ_MODERATION_MODEL: z.string().min(1).default("qwen/qwen3.8-27b"),
   GROQ_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(100).max(4000).default(800),
   EXPO_ACCESS_TOKEN: z.string().optional().default(""),
   MAX_IMAGE_SIZE_BYTES: z.coerce.number().int().positive().default(5242880),

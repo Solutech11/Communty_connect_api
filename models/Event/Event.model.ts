@@ -1,6 +1,31 @@
 ﻿import { Schema, model, models, type InferSchemaType, type Model } from "mongoose";
 import { EVENT_STATUSES } from "../../Constant";
 
+const moderationCheckSchema = new Schema(
+  {
+    acceptable: { type: Boolean, required: true },
+    reasons: [{ type: String, trim: true, maxlength: 240 }],
+  },
+  { _id: false, id: false },
+);
+
+const eventModerationSchema = new Schema(
+  {
+    provider: { type: String, enum: ["groq"], required: true },
+    model: { type: String, required: true, maxlength: 120 },
+    verdict: { type: String, enum: ["approved", "rejected"], required: true },
+    reviewedAt: { type: Date, required: true },
+    reasons: [{ type: String, trim: true, maxlength: 240 }],
+    checks: {
+      content: { type: moderationCheckSchema, required: true },
+      image: { type: moderationCheckSchema, required: true },
+      pricing: { type: moderationCheckSchema, required: true },
+      communityGuidelines: { type: moderationCheckSchema, required: true },
+    },
+  },
+  { _id: false, id: false },
+);
+
 const eventSchema = new Schema(
   {
     creatorId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
@@ -27,6 +52,7 @@ const eventSchema = new Schema(
     maxCapacity: { type: Number, required: true, min: 1 },
     tags: [{ type: String, maxlength: 40 }],
     status: { type: String, enum: EVENT_STATUSES, default: "draft", index: true },
+    moderation: { type: eventModerationSchema, default: undefined },
     submittedAt: { type: Date },
     publishedAt: { type: Date },
     approvedAt: { type: Date },
