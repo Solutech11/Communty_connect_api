@@ -14,6 +14,7 @@ import { AppError } from "../utils/AppError";
 import { sha256 } from "../utils/crypto.utils";
 import { eventModerationEmailTemplate, sendEmail } from "../utils/mailer.utils";
 import { logger } from "../utils/logger.utils";
+import { createNotification } from "../utils/notificationService.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const createSlug = (title: string): string => {
@@ -383,6 +384,20 @@ export const publishEvent = async (request: Request, response: Response): Promis
       const currentEvent = await EventModel.findById(pendingEvent._id);
       return sendSuccess(response, 200, "Event status changed while automatic review was running", {
         event: currentEvent,
+      });
+    }
+
+    if (!approved) {
+      const reasonSummary = moderation.reasons.length > 0
+        ? moderation.reasons.join(" ")
+        : "One or more event details need changes to meet our guidelines.";
+      void createNotification({
+        userId: reviewedEvent.creatorId.toString(),
+        type: "event_rejected",
+        title: "Your event needs changes",
+        body: `“${reviewedEvent.title}” was not approved: ${reasonSummary} Please update it and resubmit.`.slice(0, 500),
+        data: { eventId: reviewedEvent._id.toString(), status: reviewedEvent.status },
+        dedupeKey: `event-rejected:${reviewedEvent._id.toString()}:${reviewedAt.getTime()}`,
       });
     }
 

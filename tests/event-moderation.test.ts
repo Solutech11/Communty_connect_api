@@ -3,6 +3,7 @@ import test from "node:test";
 import "./test-env";
 import {
   isModeratableEventImageUrl,
+  mapTicketTypesForModeration,
   markUnreviewableEventImage,
   parseEventModerationResponse,
 } from "../Community_AI/Groq";
@@ -51,4 +52,18 @@ test("only secure Cloudinary cover images are sent to the vision provider", () =
   );
   assert.equal(isModeratableEventImageUrl("http://res.cloudinary.com/example/event.webp"), false);
   assert.equal(isModeratableEventImageUrl("https://example.com/event.webp"), false);
+});
+
+test("moderation receives the attendee-facing naira price instead of stored kobo", () => {
+  const [ticket] = mapTicketTypesForModeration([{
+    title: "General Admission",
+    priceKobo: 600_000,
+  }]);
+
+  assert.deepEqual(ticket, {
+    title: "General Admission",
+    priceNaira: 6_000,
+    currency: "NGN",
+  });
+  assert.equal("priceKobo" in ticket, false);
 });

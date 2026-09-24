@@ -130,7 +130,7 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | POST | `/events` | Yes | Create event draft |
 | PATCH | `/events/{id}` | Yes | Update owned draft or declined event (editing a decline returns it to draft) |
 | POST | `/events/{id}/orders` | Yes + key | Reserve inventory and initialize paid/free ticket checkout |
-| POST | `/events/{id}/publish` | Yes | Immediately review content, pricing, and cover image with Groq; publish safe events or return actionable rejection reasons |
+| POST | `/events/{id}/publish` | Yes | Immediately review content, pricing, and cover image with Groq; publish safe events or notify the organizer with rejection reasons |
 | POST | `/events/{id}/cancel` | Yes | Cancel owned event |
 | DELETE | `/events/{id}` | Yes | Delete owned draft or declined event |
 | POST | `/events/{id}/ticket-types` | Yes | Add ticket type (maximum 10) to a draft or declined event |
@@ -282,7 +282,7 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 - The portal is sectioned into moderation, members, administrator team, and revenue areas. Administrators with `admins:manage` can create active verified administrator accounts; their passwords are hashed before storage.
 - Administrators with `users:moderate` can block active non-admin accounts. Blocking revokes refresh sessions immediately; unblocking restores the member account. Administrator accounts cannot be blocked through the portal.
 - Admin browser sessions are hashed in MongoDB, expire automatically, bind to IP and user agent, use secure HttpOnly SameSite cookies, and require CSRF tokens for every action.
-- `POST /events/{id}/publish` runs immediate Groq moderation over event details, ticket-price consistency, and the authenticated Cloudinary cover image. Safe events are published automatically. Declined events retain category-specific reasons, email the organizer, and can be corrected and resubmitted. If the provider is unavailable, the event remains `pending_approval` for manual portal review. Published events can be deactivated with a recorded reason.
+- `POST /events/{id}/publish` runs immediate Groq moderation over event details, ticket-price consistency, and the authenticated Cloudinary cover image. Safe events are published automatically. Declined events retain category-specific reasons, notify the organizer in-app and by email, and can be corrected and resubmitted. If the provider is unavailable, the event remains `pending_approval` for manual portal review. Published events can be deactivated with a recorded reason.
 - Platform percentages are configured as integer basis points: `DEPOSIT_CHARGE_BPS`, `WITHDRAWAL_CHARGE_BPS`, `TICKET_CHARGE_BPS`, and `COMMUNITY_CHARGE_BPS`.
 - Deposit fees are added to the desired wallet credit; withdrawal fees are deducted from the requested payout; ticket fees are added as a service fee; premium-community fees are retained from owner proceeds.
 - Earnings are recognized only inside the same Mongo transaction that completes the verified payment or successful withdrawal. The immutable source reference prevents duplicate earnings.
