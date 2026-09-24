@@ -35,7 +35,7 @@ Required local services:
 
 1. MongoDB. Wallet transfers use Mongo transactions, so production and full financial-flow testing require a replica set or MongoDB Atlas.
 2. Redis. Financial routes fail closed when a distributed lock cannot be acquired.
-3. Provider credentials and configured dashboard settings for Paystack, Cloudinary, ZeptoMail, OpenAI, and Expo enhanced push security if enabled.
+3. Provider credentials and configured dashboard settings for Paystack, Cloudinary, ZeptoMail, Groq, Geoapify (for location search), and Expo enhanced push security if enabled.
 
 ## Commands
 
@@ -110,6 +110,14 @@ Personalization fields on a user are `preferredSetting` (`indoor` or `outdoor`),
 participation role is a preference only and never grants organizer, moderator,
 or admin permissions. `PATCH /users/me` accepts these fields together with
 `phone`, `interests`, and the other documented allowlisted profile fields. GET /users/me also returns totals.connections (accepted friendships) and totals.events (all events created by the signed-in user, across statuses).
+
+### Locations
+
+| Method | Path | Auth | Purpose |
+|---|---|---:|---|
+| GET | `/locations/search` | Yes | Search Geoapify address suggestions (required `q`; optional `countryCode`, paired `latitude`/`longitude`, and limit capped at 8) |
+
+Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to the mobile app.
 
 ### Events and Tickets
 

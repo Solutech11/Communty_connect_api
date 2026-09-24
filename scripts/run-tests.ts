@@ -10,6 +10,7 @@ const testFiles = [
   "tests/recommendation.test.ts",
   "tests/security.test.ts",
   "tests/location.test.ts",
+  "tests/location-search.test.ts",
   "tests/event-moderation.test.ts",
 ];
 

@@ -241,29 +241,72 @@ export const publishEvent = async (request: Request, response: Response): Promis
     throw new AppError(422, "Event dates are invalid for publishing", "INVALID_EVENT_DATES");
   }
 
-  if (event.status !== "draft" && event.status !== "rejected") {
-    throw new AppError(409, "Only a draft or declined event can be submitted", "EVENT_NOT_SUBMITTABLE");
+  const retryingPendingReview =
+    event.status === "pending_approval" && !event.moderation;
+  if (
+    event.status !== "draft" &&
+    event.status !== "rejected" &&
+    !retryingPendingReview
+  ) {
+    throw new AppError(
+      409,
+      "Only a draft, declined event, or event awaiting automatic review can be submitted",
+      "EVENT_NOT_SUBMITTABLE",
+    );
   }
 
-  // Claim the review transition before calling Groq so duplicate client taps
-  // cannot result in two provider calls or competing publish decisions.
+  // Claim the review before calling Groq so duplicate taps cannot cause
+  // concurrent provider calls or competing publish decisions. A pending event
+  // is retryable only when its automatic review previously failed unavailable.
   const submittedAt = new Date();
-  const pendingEvent = await EventModel.findOneAndUpdate(
-    {
-      _id: event._id,
-      creatorId: request.auth?.id,
-      status: { $in: ["draft", "rejected"] },
+  const moderationLeaseUntil = new Date(submittedAt.getTime() + 5 * 60_000);
+  const claimUpdate = {
+    $set: {
+      status: "pending_approval" as const,
+      submittedAt,
+      moderationInProgressUntil: moderationLeaseUntil,
     },
-    {
-      $set: { status: "pending_approval", submittedAt },
-      $unset: { moderation: 1, approvedAt: 1, approvedBy: 1, publishedAt: 1 },
-    },
-    { new: true, runValidators: true },
-  );
+    $unset: { moderation: 1, approvedAt: 1, approvedBy: 1, publishedAt: 1 },
+  };
+  const pendingEvent = retryingPendingReview
+    ? await EventModel.findOneAndUpdate(
+        {
+          _id: event._id,
+          creatorId: request.auth?.id,
+          status: "pending_approval",
+          moderation: { $exists: false },
+          $or: [
+            { moderationInProgressUntil: { $exists: false } },
+            { moderationInProgressUntil: { $lte: submittedAt } },
+          ],
+        },
+        claimUpdate,
+        { new: true, runValidators: true, includeResultMetadata: false },
+      )
+    : await EventModel.findOneAndUpdate(
+        {
+          _id: event._id,
+          creatorId: request.auth?.id,
+          status: { $in: ["draft", "rejected"] },
+        },
+        claimUpdate,
+        { new: true, runValidators: true, includeResultMetadata: false },
+      );
 
   if (!pendingEvent) {
     throw new AppError(409, "Event is already being reviewed or is no longer submittable", "EVENT_NOT_SUBMITTABLE");
   }
+
+  const releaseModerationClaim = () =>
+    EventModel.findOneAndUpdate(
+      {
+        _id: pendingEvent._id,
+        status: "pending_approval",
+        moderationInProgressUntil: moderationLeaseUntil,
+      },
+      { $unset: { moderationInProgressUntil: 1 } },
+      { new: true, includeResultMetadata: false },
+    );
 
   const imageReviewStatus = !pendingEvent.coverImageUrl
     ? "not_provided"
@@ -306,7 +349,11 @@ export const publishEvent = async (request: Request, response: Response): Promis
     const reviewedAt = new Date();
     const approved = moderation.verdict === "approved";
     const reviewedEvent = await EventModel.findOneAndUpdate(
-      { _id: pendingEvent._id, status: "pending_approval" },
+      {
+        _id: pendingEvent._id,
+        status: "pending_approval",
+        moderationInProgressUntil: moderationLeaseUntil,
+      },
       {
         $set: {
           status: approved ? "published" : "rejected",
@@ -320,9 +367,16 @@ export const publishEvent = async (request: Request, response: Response): Promis
           },
           ...(approved ? { approvedAt: reviewedAt, publishedAt: reviewedAt } : {}),
         },
-        $unset: approved ? { approvedBy: 1 } : { approvedAt: 1, approvedBy: 1, publishedAt: 1 },
+        $unset: approved
+          ? { approvedBy: 1, moderationInProgressUntil: 1 }
+          : {
+              approvedAt: 1,
+              approvedBy: 1,
+              publishedAt: 1,
+              moderationInProgressUntil: 1,
+            },
       },
-      { new: true, runValidators: true },
+      { new: true, runValidators: true, includeResultMetadata: false },
     );
 
     if (!reviewedEvent) {
@@ -362,11 +416,28 @@ export const publishEvent = async (request: Request, response: Response): Promis
       { event: reviewedEvent },
     );
   } catch (error) {
+    let releasedEvent = null;
+    try {
+      releasedEvent = await releaseModerationClaim();
+    } catch (releaseError) {
+      logger.warn(
+        {
+          operation: "event_moderation_claim_release",
+          eventId: pendingEvent._id.toString(),
+          error: releaseError,
+        },
+        "Event moderation retry lock could not be released",
+      );
+    }
+
     if (error instanceof AppError && error.code === "GROQ_MODERATION_UNAVAILABLE") {
       // Fail closed: provider trouble can never turn a submission into a live event.
-      return sendSuccess(response, 202, "Event submitted for manual review because automatic review is unavailable", {
-        event: pendingEvent,
-      });
+      return sendSuccess(
+        response,
+        202,
+        "Event submitted for manual review because automatic review is unavailable",
+        { event: releasedEvent ?? pendingEvent },
+      );
     }
 
     throw error;

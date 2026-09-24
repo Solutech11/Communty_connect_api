@@ -99,6 +99,18 @@ export const aiRateLimiter = rateLimit({
   },
 });
 
+export const locationSearchRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  store: rateLimitStore("rl:location-search:"),
+  keyGenerator: (request) => `user:${request.auth?.id || ipKeyGenerator(request.ip || "unknown")}`,
+  handler: (_request, _response, next) => {
+    next(new AppError(429, "Too many location searches. Try again later.", "RATE_LIMIT_EXCEEDED"));
+  },
+});
+
 export const requestSlowdown = slowDown({
   windowMs: 60 * 1000,
   delayAfter: 100,

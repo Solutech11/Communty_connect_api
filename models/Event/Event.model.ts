@@ -53,6 +53,7 @@ const eventSchema = new Schema(
     tags: [{ type: String, maxlength: 40 }],
     status: { type: String, enum: EVENT_STATUSES, default: "draft", index: true },
     moderation: { type: eventModerationSchema, default: undefined },
+    moderationInProgressUntil: { type: Date, select: false },
     submittedAt: { type: Date },
     publishedAt: { type: Date },
     approvedAt: { type: Date },

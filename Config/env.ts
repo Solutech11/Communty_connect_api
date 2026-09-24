@@ -46,6 +46,7 @@ const envSchema = z.object({
   GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-20b"),
   GROQ_MODERATION_MODEL: z.string().min(1).default("qwen/qwen3.8-27b"),
   GROQ_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(100).max(4000).default(800),
+  GEOAPIFY_API_KEY: z.string().trim().default(""),
   EXPO_ACCESS_TOKEN: z.string().optional().default(""),
   MAX_IMAGE_SIZE_BYTES: z.coerce.number().int().positive().default(5242880),
   MAX_COMMUNITY_FILE_SIZE_BYTES: z.coerce.number().int().positive().max(26214400).default(10485760),
@@ -77,6 +78,7 @@ if (parsed.data.NODE_ENV === "production") {
     parsed.data.CLOUDINARY_API_SECRET,
     parsed.data.ZEPTOMAIL_SEND_MAIL_TOKEN,
     parsed.data.GROQ_API_KEY,
+    parsed.data.GEOAPIFY_API_KEY,
   ].some((value) => /replace|placeholder|change-me/i.test(value));
 
   if (unsafePlaceholders || /^0{64}$/.test(parsed.data.FIELD_ENCRYPTION_KEY)) {

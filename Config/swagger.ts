@@ -1,6 +1,9 @@
 import { env } from "./env";
 import { apiEndpoints } from "../docs/endpoint-registry";
 import {
+  applyRequestBodyEnumContracts,
+  applyResponseEnumContracts,
+  inferSchema,
   pathParameterExamples,
   queryParameterContracts,
   requestBodyContracts,
@@ -80,7 +83,40 @@ for (const endpoint of apiEndpoints) {
           processing: { type: "boolean" },
         },
       }
-    : { $ref: "#/components/schemas/SuccessResponse" };
+    : {
+        ...applyResponseEnumContracts(inferSchema(success.example, true), key),
+        required: Object.keys(success.example),
+      };
+
+  if (key === "GET /locations/search") {
+    const data = (successSchema.properties as Record<string, Record<string, unknown>>).data!;
+    const results = (data.properties as Record<string, Record<string, unknown>>).results!;
+    const suggestion = results.items as Record<string, unknown>;
+    const fields = suggestion.properties as Record<string, Record<string, unknown>>;
+    suggestion.required = ["id", "name", "label", "address", "latitude", "longitude", "state", "localArea"];
+    fields.state = { type: ["string", "null"] };
+    fields.localArea = { type: ["string", "null"] };
+    data.required = ["results", "attribution"];
+  }
+
+  const pendingReviewExample = key === "POST /events/{id}/publish"
+    ? (() => {
+        const data = success.example.data as { event: Record<string, unknown> };
+        const {
+          moderation: _moderation,
+          approvedAt: _approvedAt,
+          publishedAt: _publishedAt,
+          ...pendingEvent
+        } = data.event;
+        return {
+          success: true,
+          message: "Event submitted for manual review because automatic review is unavailable",
+          data: {
+            event: { ...pendingEvent, status: "pending_approval" },
+          },
+        };
+      })()
+    : undefined;
 
   const operation: Record<string, unknown> = {
     tags: [endpoint.tag],
@@ -99,6 +135,17 @@ for (const endpoint of apiEndpoints) {
           },
         },
       },
+      ...(pendingReviewExample ? {
+        "202": {
+          description: "Event remains pending for manual review because Groq moderation is unavailable.",
+          content: {
+            "application/json": {
+              schema: successSchema,
+              example: pendingReviewExample,
+            },
+          },
+        },
+      } : {}),
       "400": { $ref: "#/components/responses/BadRequest" },
       "401": { $ref: "#/components/responses/Unauthorized" },
       "403": { $ref: "#/components/responses/Forbidden" },
@@ -108,6 +155,10 @@ for (const endpoint of apiEndpoints) {
       "422": { $ref: "#/components/responses/ValidationError" },
       "429": { $ref: "#/components/responses/RateLimited" },
       "500": { $ref: "#/components/responses/ServerError" },
+      ...(key === "GET /locations/search" ? {
+        "502": { $ref: "#/components/responses/BadGateway" },
+        "503": { $ref: "#/components/responses/ServiceUnavailable" },
+      } : {}),
     },
     ...(endpoint.roles ? { "x-required-roles": endpoint.roles } : {}),
   };
@@ -123,7 +174,7 @@ for (const endpoint of apiEndpoints) {
       description: body.description,
       content: {
         [body.contentType]: {
-          schema: body.schema,
+          schema: applyRequestBodyEnumContracts(body.schema, key),
           example: body.example,
         },
       },
@@ -191,6 +242,8 @@ const reusableErrors: Array<[string, number, string, Record<string, unknown>]> =
   ["ValidationError", 422, "Zod validation failed", errorExample("VALIDATION_ERROR", "Request validation failed.", [{ path: "body.amountKobo", message: "Expected a positive integer" }])],
   ["RateLimited", 429, "Rate limit exceeded", errorExample("RATE_LIMITED", "Too many requests. Try again later.")],
   ["ServerError", 500, "Unexpected server error", errorExample("INTERNAL_SERVER_ERROR", "The request could not be completed.")],
+  ["BadGateway", 502, "Location provider error", errorExample("LOCATION_PROVIDER_UNAVAILABLE", "Location search is temporarily unavailable")],
+  ["ServiceUnavailable", 503, "Location search is not configured", errorExample("LOCATION_SEARCH_UNAVAILABLE", "Location search is unavailable")],
 ];
 
 export const openApiDocument = {
@@ -198,7 +251,7 @@ export const openApiDocument = {
   info: {
     title: "Community Connect API",
     version: "1.1.0",
-    description: "Secure REST and realtime backend for events, communities, chat, AI, wallet, notifications, and disputes. Every operation includes concrete request parameters and response examples. Money is represented in integer kobo.",
+    description: "Secure REST and realtime backend for events, communities, chat, AI, wallet, notifications, and disputes. Every operation includes request and response schemas, accepted enum values for constrained fields, and examples. Money is represented in integer kobo.",
   },
   servers: [
     { url: `${env.APP_BASE_URL}${env.API_PREFIX}`, description: env.NODE_ENV },

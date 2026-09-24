@@ -1,5 +1,15 @@
 ﻿export type OpenApiSchema = Record<string, unknown>;
 
+import {
+  DISPUTE_STATUSES,
+  EVENT_STATUSES,
+  TRANSACTION_STATUSES,
+  USER_PARTICIPATION_ROLES,
+  USER_PREFERRED_GROUP_SIZES,
+  USER_PREFERRED_SETTINGS,
+  USER_ROLES,
+} from "../Constant";
+
 export interface RequestBodyContract {
   contentType: "application/json" | "multipart/form-data";
   description: string;
@@ -20,6 +30,221 @@ export interface SuccessContract {
   description: string;
   example: Record<string, unknown>;
 }
+
+export type OpenApiEnumValue = string | number | boolean;
+export type OpenApiEnumValues = readonly OpenApiEnumValue[];
+
+const eventSettings = ["indoor", "outdoor", "online", "hybrid"] as const;
+const pointTypes = ["Point"] as const;
+const reportRequestReasons = ["spam", "harassment", "hate", "violence", "scam", "unsafe", "misinformation", "other"] as const;
+const reportModelReasons = ["spam", "harassment", "hate", "hate_speech", "violence", "scam", "unsafe", "inappropriate", "misinformation", "other"] as const;
+const communityMessageReportReasons = ["spam", "harassment", "hate_speech", "unsafe", "inappropriate", "other"] as const;
+const ticketOrderStatuses = ["pending", "paid", "cancelled", "refunded"] as const;
+const userStatuses = ["pending_verification", "active", "suspended", "deleted"] as const;
+// Mirrored from models/Community/CommunityMember.model.ts to keep the docs
+// generator independent from Mongoose model registration.
+const communityMemberRoles = ["owner", "moderator", "member"] as const;
+const communityMemberStatuses = ["pending", "active", "rejected", "removed", "banned"] as const;
+const communityNotificationLevels = ["all", "announcements", "mentions", "muted"] as const;
+
+/**
+ * Enum values are mirrored from the Zod route validators. Keeping these next
+ * to the request contracts makes Swagger disclose the same accepted values.
+ */
+export const requestBodyEnumContracts: Record<string, Record<string, OpenApiEnumValues>> = {
+  "POST /auth/register": { "location.type": pointTypes },
+  "PATCH /users/me": {
+    "location.type": pointTypes,
+    preferredSetting: USER_PREFERRED_SETTINGS,
+    preferredGroupSize: USER_PREFERRED_GROUP_SIZES,
+    participationRole: USER_PARTICIPATION_ROLES,
+  },
+  "POST /users/{id}/reports": { reason: reportRequestReasons },
+  "PATCH /friends/requests/{id}": { action: ["accept", "decline", "reject"] },
+  "POST /chat/conversations": { type: ["direct", "group", "support"] },
+  "POST /chat/conversations/{id}/messages": { type: ["text", "image"] },
+  "PATCH /communities/{id}/settings": {
+    joinPolicy: ["open", "approval", "invite_only", "access_code"],
+    messagePermission: ["everyone", "moderators"],
+  },
+  "PATCH /communities/{id}/members/{userId}": {
+    role: ["moderator", "member"],
+    status: ["active", "removed"],
+  },
+  "PATCH /communities/{id}/join-requests/{requestId}": { status: ["approved", "rejected"] },
+  "POST /communities/{id}/calls": { type: ["voice", "video"] },
+  "PATCH /communities/{id}/notification-preferences/me": { level: communityNotificationLevels },
+  "POST /communities/{id}/messages/{messageId}/reports": { reason: communityMessageReportReasons },
+  "POST /communities/{id}/reports": { reason: reportRequestReasons },
+  "POST /events": { setting: eventSettings, "coordinates.type": pointTypes },
+  "PATCH /events/{id}": { setting: eventSettings, "coordinates.type": pointTypes },
+  "POST /events/{id}/reports": { reason: reportRequestReasons },
+  "POST /communities": {
+    visibility: ["public", "private"],
+    membershipType: ["free", "premium"],
+  },
+  "PATCH /communities/{id}": {
+    visibility: ["public", "private"],
+    membershipType: ["free", "premium"],
+  },
+  "POST /disputes": { category: ["payment", "withdrawal", "transfer", "ticket", "event", "harassment", "other"] },
+  "PATCH /disputes/{id}/status": { status: DISPUTE_STATUSES },
+  "POST /uploads/files": { folder: ["community-chat"] },
+  "POST /uploads/images": { folder: ["avatars", "events", "communities", "disputes", "chat", "uploads"] },
+};
+
+const responseEnumContractsByObject: Record<string, Record<string, OpenApiEnumValues>> = {
+  event: { setting: eventSettings, status: EVENT_STATUSES },
+  moderation: { provider: ["groq"], verdict: ["approved", "rejected"] },
+  user: {
+    role: USER_ROLES,
+    status: userStatuses,
+    preferredSetting: USER_PREFERRED_SETTINGS,
+    preferredGroupSize: USER_PREFERRED_GROUP_SIZES,
+    participationRole: USER_PARTICIPATION_ROLES,
+  },
+  community: {
+    visibility: ["public", "private"],
+    membershipType: ["free", "premium"],
+    joinPolicy: ["open", "approval", "invite_only", "access_code"],
+    messagePermission: ["everyone", "moderators"],
+  },
+  settings: {
+    joinPolicy: ["open", "approval", "invite_only", "access_code"],
+    messagePermission: ["everyone", "moderators"],
+  },
+  viewerMembership: { role: communityMemberRoles, status: communityMemberStatuses },
+  member: {
+    communityRole: communityMemberRoles,
+    status: communityMemberStatuses,
+  },
+  joinRequest: { status: ["pending", "approved", "rejected", "cancelled"] },
+  friendship: { status: ["pending", "accepted", "declined", "blocked"] },
+  request: { status: ["pending", "accepted", "declined", "blocked"] },
+  wallet: { status: ["active", "frozen", "closed"] },
+  transaction: {
+    type: ["topup", "internal_transfer", "withdrawal", "ticket_purchase", "community_purchase", "refund", "adjustment"],
+    direction: ["credit", "debit"],
+    status: TRANSACTION_STATUSES,
+    provider: ["internal", "paystack"],
+  },
+  order: { status: ticketOrderStatuses },
+  conversation: { type: ["direct", "group", "support", "ai"] },
+  message: { type: ["text", "image", "system"], kind: ["post", "announcement", "message"] },
+  lastMessagePreview: { type: ["text", "image", "system"] },
+  post: { kind: ["post", "announcement", "message"] },
+  announcement: { kind: ["post", "announcement", "message"] },
+  call: { type: ["voice", "video"], status: ["active", "ended"] },
+  report: {
+    targetType: ["event", "community", "user", "community_message"],
+    reason: reportModelReasons,
+    status: ["open", "reviewing", "resolved", "dismissed"],
+  },
+  dispute: {
+    category: ["payment", "withdrawal", "transfer", "ticket", "event", "harassment", "other"],
+    status: DISPUTE_STATUSES,
+    priority: ["low", "normal", "high", "urgent"],
+  },
+  attachment: { type: ["image", "pdf", "file"] },
+  session: { purpose: ["assistant", "event_copy", "recommendations", "chat_summary", "moderation"] },
+};
+
+const pluralObjectNames: Record<string, string> = {
+  announcements: "announcement",
+  calls: "call",
+  communities: "community",
+  conversations: "conversation",
+  disputes: "dispute",
+  events: "event",
+  friendships: "friendship",
+  requests: "friendship",
+  joinRequests: "joinRequest",
+  members: "user",
+  messages: "message",
+  orders: "order",
+  posts: "post",
+  reports: "report",
+  sessions: "session",
+  transactions: "transaction",
+  users: "user",
+  eventId: "event",
+  communityId: "community",
+  requester: "user",
+  requesterId: "user",
+  addressee: "user",
+  addresseeId: "user",
+  sender: "user",
+  senderId: "user",
+  authorId: "user",
+  updatedBy: "user",
+  createdBy: "user",
+  reviewedBy: "user",
+  checkedInBy: "user",
+  deletedBy: "user",
+  participants: "user",
+};
+
+const responseRootEnumContracts: Record<string, Record<string, OpenApiEnumValues>> = {
+  "PATCH /communities/{id}/notification-preferences/me": { "data.level": communityNotificationLevels },
+  "PUT /communities/{id}/bans/{userId}": { "data.status": ["banned"] },
+  "DELETE /communities/{id}/bans/{userId}": { "data.status": ["removed"] },
+  "DELETE /communities/{id}/join-requests/me": { "data.status": ["cancelled"] },
+};
+
+const responseEnumOverrides = (
+  path: string,
+  operationKey: string,
+): OpenApiEnumValues | undefined => {
+  const specific = responseRootEnumContracts[operationKey]?.[path];
+  if (specific) return specific;
+
+  const segments = path.split(".");
+  const property = segments.at(-1) || "";
+  const rawParent = segments.at(-2)?.replace(/\[\]$/, "") || "";
+  const parent = pluralObjectNames[rawParent] || rawParent;
+  return responseEnumContractsByObject[parent]?.[property];
+};
+
+const applyEnumOverrides = (
+  schema: OpenApiSchema,
+  resolveEnum: (path: string) => OpenApiEnumValues | undefined,
+): OpenApiSchema => {
+  const visit = (node: OpenApiSchema, path: string): OpenApiSchema => {
+    const result: OpenApiSchema = { ...node };
+    const enumValues = resolveEnum(path);
+
+    if (enumValues) {
+      delete result.const;
+      result.enum = [...enumValues];
+    }
+
+    if (node.properties && typeof node.properties === "object") {
+      result.properties = Object.fromEntries(
+        Object.entries(node.properties as Record<string, OpenApiSchema>).map(([name, child]) => [
+          name,
+          visit(child, path ? path + "." + name : name),
+        ]),
+      );
+    }
+
+    if (node.items && typeof node.items === "object") {
+      result.items = visit(node.items as OpenApiSchema, path + "[]");
+    }
+
+    return result;
+  };
+
+  return visit(schema, "");
+};
+
+export const applyRequestBodyEnumContracts = (schema: OpenApiSchema, operationKey: string): OpenApiSchema => {
+  const contracts = requestBodyEnumContracts[operationKey] || {};
+  return applyEnumOverrides(schema, (path) => contracts[path]);
+};
+
+export const applyResponseEnumContracts = (schema: OpenApiSchema, operationKey: string): OpenApiSchema => {
+  return applyEnumOverrides(schema, (path) => responseEnumOverrides(path, operationKey));
+};
 
 const id = "6650f0c8b9f1c2d3e4a5b6c7";
 const secondId = "6650f0c8b9f1c2d3e4a5b6c8";
@@ -274,16 +499,16 @@ const report = {
   createdAt,
 };
 
-const inferSchema = (value: unknown): OpenApiSchema => {
+export const inferSchema = (value: unknown, allowAdditionalProperties = false): OpenApiSchema => {
   if (Array.isArray(value)) {
-    return { type: "array", items: value.length > 0 ? inferSchema(value[0]) : {} };
+    return { type: "array", items: value.length > 0 ? inferSchema(value[0], allowAdditionalProperties) : {} };
   }
 
   if (value !== null && typeof value === "object") {
     const properties = Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, inferSchema(item)]),
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, inferSchema(item, allowAdditionalProperties)]),
     );
-    return { type: "object", additionalProperties: false, properties };
+    return { type: "object", additionalProperties: allowAdditionalProperties, properties };
   }
 
   if (typeof value === "number") {
@@ -447,7 +672,7 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "DELETE /users/me": jsonBody({ password: "StrongPass1!" }, ["password"]),
 
   "PUT /communities/{id}/rules": jsonBody({ introduction: "Keep the community welcoming and useful.", rules: [{ title: "Be respectful", description: "Treat every member with respect.", order: 0 }], consequences: ["Repeated violations may result in removal."] }, ["introduction", "rules", "consequences"]),
-  "PATCH /communities/{id}/settings": jsonBody({ joinPolicy: "approval", messagePermission: "moderators", membersCanCreatePosts: true, membersCanInvite: false, showMemberList: true }, [], "Send at least one community setting."),
+  "PATCH /communities/{id}/settings": jsonBody({ joinPolicy: "access_code", accessCode: "COMMUNITY-ACCESS-2026", messagePermission: "moderators", membersCanCreatePosts: true, membersCanInvite: false, showMemberList: true }, [], "Send at least one community setting. Access codes are only written; they are never returned by the API."),
   "PATCH /communities/{id}/members/{userId}": jsonBody({ role: "moderator", status: "active" }, [], "Owners may change roles; owners and moderators may update eligible member status."),
   "PUT /communities/{id}/bans/{userId}": jsonBody({ reason: "Repeated harassment in community messages.", expiresAt: "2026-12-31T23:59:59.000Z" }, ["reason"]),
   "POST /communities/{id}/join-requests": jsonBody({ message: "I would like to join the community." }, [], "For an open free public community this activates membership immediately; otherwise a pending request is created."),
@@ -509,7 +734,53 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "POST /webhooks/paystack": jsonBody({ event: "charge.success", data: { id: 123456789, reference: "topup_550e8400-e29b-41d4-a716-446655440000", amount: 101000, status: "success" } }, ["event", "data"], "Signed Paystack payload. Paystack must supply x-paystack-signature; clients must not call this endpoint."),
 };
 
+const communityUpdateContract = requestBodyContracts["PATCH /communities/{id}"];
+if (communityUpdateContract) {
+  communityUpdateContract.schema = {
+    ...communityUpdateContract.schema,
+    properties: {
+      ...(communityUpdateContract.schema.properties as Record<string, OpenApiSchema>),
+      visibility: { type: "string" },
+    },
+  };
+}
+
+const eventUpdateContract = requestBodyContracts["PATCH /events/{id}"];
+if (eventUpdateContract) {
+  eventUpdateContract.schema = {
+    ...eventUpdateContract.schema,
+    properties: {
+      ...(eventUpdateContract.schema.properties as Record<string, OpenApiSchema>),
+      setting: { type: "string" },
+      coordinates: {
+        type: "object",
+        additionalProperties: false,
+        required: ["type", "coordinates"],
+        properties: {
+          type: { type: "string" },
+          coordinates: {
+            type: "array",
+            minItems: 2,
+            maxItems: 2,
+            prefixItems: [
+              { type: "number", minimum: -180, maximum: 180 },
+              { type: "number", minimum: -90, maximum: 90 },
+            ],
+          },
+        },
+      },
+    },
+  };
+}
+
 export const queryParameterContracts: Record<string, QueryParameterContract[]> = {
+  "GET /locations/search": [
+    { ...query("q", "Location search text.", { type: "string", minLength: 1, maxLength: 200 }, "Eko Hotel"), required: true },
+    query("countryCode", "Optional ISO 3166-1 alpha-2 country code.", { type: "string", pattern: "^[A-Za-z]{2}$" }, "NG"),
+    query("latitude", "Latitude; must be supplied with longitude.", { type: "number", minimum: -90, maximum: 90 }, 6.5244),
+    query("longitude", "Longitude; must be supplied with latitude.", { type: "number", minimum: -180, maximum: 180 }, 3.3792),
+    query("limit", "Maximum suggestions; larger positive values are capped at 8.", { type: "integer", minimum: 1, default: 8 }, 8),
+  ],
   "GET /users/me/communities": [
     ...paginationQuery,
     query("search", "Search community name and description.", { type: "string", maxLength: 100 }, "Lagos"),
@@ -572,6 +843,19 @@ export const queryParameterContracts: Record<string, QueryParameterContract[]> =
 };
 
 export const successContracts: Record<string, SuccessContract> = {
+  "GET /locations/search": ok("Location suggestions loaded.", {
+    results: [{
+      id: "provider-result-id",
+      name: "Eko Hotel & Suites",
+      label: "Eko Hotel & Suites, Victoria Island, Lagos, Nigeria",
+      address: "Victoria Island, Lagos, Nigeria",
+      latitude: 6.4281,
+      longitude: 3.4219,
+      state: "Lagos",
+      localArea: "Eti-Osa",
+    }],
+    attribution: "Powered by Geoapify · © OpenStreetMap contributors",
+  }),
   "POST /auth/register": ok("Account created. Check your email for the verification code.", { userId: id, email: "ada@example.com" }, 201),
   "POST /auth/verify-email": ok("Email verified", { user: profileUser, session }),
   "POST /auth/resend-verification": ok("If the account requires verification, a new code has been sent."),
