@@ -21,6 +21,7 @@ import {
 } from "../utils/paystack.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
 import { calculatePlatformCharge, recordPlatformEarning } from "../utils/platformCharge.utils";
+import { logger } from "../utils/logger.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const financialReference = (prefix: string): string => {
@@ -160,12 +161,19 @@ export const verifyTopup = async (request: Request, response: Response): Promise
   }
 
   const provider = await verifyPaystackTransaction((request.params.reference as string));
-
-  console.log(provider);  
-
   const totalPayableKobo = transaction.amountKobo + (transaction.feeKobo || 0);
 
   if (provider.status !== "success" || provider.amount !== totalPayableKobo) {
+    if (provider.amount !== totalPayableKobo) {
+      logger.warn({
+        operation: "verify_wallet_topup",
+        transactionId: transaction._id.toString(),
+        expectedAmountKobo: totalPayableKobo,
+        providerAmountKobo: provider.amount,
+        walletCreditKobo: transaction.amountKobo,
+        depositFeeKobo: transaction.feeKobo || 0,
+      }, "Paystack top-up amount mismatch");
+    }
     throw new AppError(409, "Payment is not confirmed", "PAYMENT_NOT_CONFIRMED");
   }
 
@@ -192,6 +200,14 @@ export const creditVerifiedTopup = async (reference: string, providerAmount?: nu
       const totalPayableKobo = transaction.amountKobo + feeKobo;
 
       if (providerAmount !== undefined && providerAmount !== totalPayableKobo) {
+        logger.warn({
+          operation: "credit_verified_topup",
+          transactionId: transaction._id.toString(),
+          expectedAmountKobo: totalPayableKobo,
+          providerAmountKobo: providerAmount,
+          walletCreditKobo: transaction.amountKobo,
+          depositFeeKobo: feeKobo,
+        }, "Paystack top-up amount mismatch");
         throw new AppError(409, "Payment amount does not match", "PAYMENT_AMOUNT_MISMATCH");
       }
 
