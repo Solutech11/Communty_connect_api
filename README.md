@@ -124,7 +124,7 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
 | GET | `/events` | Optional | Search/filter events; nearest first when location is supplied or saved |
-| GET | `/events/recommended` | Yes | Personalized nearby ranking from interests and ticket history |
+| GET | `/events/recommended` | Yes | Personalized upcoming ranking, including events with your paid tickets |
 | GET | `/events/created/me` | Yes | List my created events |
 | GET | `/events/{id}` | Conditional | Get event and active ticket types; draft is owner-only |
 | POST | `/events` | Yes | Create event draft |
@@ -142,6 +142,8 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | GET | `/tickets` | Yes | List my ticket orders |
 | GET | `/tickets/{orderNumber}` | Yes | Get owned paid ticket and QR token |
 | GET | `/tickets/{orderNumber}/verify` | Yes | Verify exact Paystack payment and issue ticket |
+
+`GET /events/{id}` returns active ticket tiers at `data.ticketTypes`. Each tier exposes its MongoDB `_id`, title, optional description and capacity, `priceKobo`, sold count, active flag, and timestamps. Ticket purchase prices use integer kobo in the API; the mobile UI converts them to naira for display. `/tickets` returns `data.tickets` with full order fields plus populated event and ticket-type summaries.
 
 ### Communities and Friends
 
@@ -300,7 +302,7 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 
 - `POST /auth/register` and `PATCH /users/me` accept an optional GeoJSON `location` using coordinates in `[longitude, latitude]` order. Omit `location` entirely when it is unavailable; never send a partial point.
 - `GET /events` sorts by MongoDB geospatial distance whenever coordinates are provided or the authenticated user has a saved location.
-- `GET /events/recommended` combines distance, profile interests, paid ticket history, local area, popularity, and start-date freshness.
+- `GET /events/recommended` combines distance, profile interests, paid ticket history, local area, popularity, and start-date freshness. It also includes and prioritizes your upcoming published ticketed events, marked with `hasTicket: true` and a `You have a ticket` reason.
 - Distance has the highest weight, so personalization cannot bury genuinely nearby events. The response includes score, distance, and human-readable reasons.
 - This ranking runs locally in TypeScript/MongoDB and does not call Groq.
 

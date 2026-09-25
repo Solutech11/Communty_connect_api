@@ -31,6 +31,7 @@ const ticketOrderSchema = new Schema(
 
 ticketOrderSchema.index({ eventId: 1, buyerId: 1 });
 ticketOrderSchema.index({ buyerId: 1, idempotencyKey: 1 }, { unique: true });
+ticketOrderSchema.index({ buyerId: 1, status: 1, createdAt: -1 });
 
 export type TicketOrder = InferSchemaType<typeof ticketOrderSchema>;
 export const TicketOrderModel =

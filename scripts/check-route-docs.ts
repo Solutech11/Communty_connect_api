@@ -2,8 +2,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { apiEndpoints } from "../docs/endpoint-registry";
 import {
+  pathParameterExamples,
   queryParameterContracts,
   requestBodyContracts,
+  requestBodySchemaContracts,
   successContracts,
 } from "../docs/openapi-contracts";
 
@@ -64,11 +66,28 @@ const main = async (): Promise<void> => {
     );
   }
 
+  const missingExplicitRequestSchemas = expectedBodyKeys.filter((key) => !requestBodySchemaContracts[key]);
+  const extraExplicitRequestSchemas = Object.keys(requestBodySchemaContracts).filter(
+    (key) => !expectedBodyKeys.includes(key),
+  );
+  if (missingExplicitRequestSchemas.length > 0 || extraExplicitRequestSchemas.length > 0) {
+    throw new Error(
+      `OpenAPI request-schema drift. Missing: ${missingExplicitRequestSchemas.join(", ") || "none"}; extra: ${extraExplicitRequestSchemas.join(", ") || "none"}.`,
+    );
+  }
+
   const invalidQueryContracts = Object.keys(queryParameterContracts).filter(
     (key) => !endpointKeySet.has(key),
   );
   if (invalidQueryContracts.length > 0) {
     throw new Error(`OpenAPI query contracts reference unknown routes: ${invalidQueryContracts.join(", ")}`);
+  }
+  const pathParameterNames = new Set(
+    apiEndpoints.flatMap((endpoint) => [...endpoint.path.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]!)),
+  );
+  const missingPathParameterContracts = [...pathParameterNames].filter((name) => !pathParameterExamples[name]);
+  if (missingPathParameterContracts.length > 0) {
+    throw new Error(`OpenAPI path parameters missing schemas/examples: ${missingPathParameterContracts.join(", ")}`);
   }
   if (routeCount !== apiEndpoints.length) {
     throw new Error(
@@ -76,7 +95,7 @@ const main = async (): Promise<void> => {
     );
   }
 
-  process.stdout.write(`Documented ${apiEndpoints.length} API routes with request contracts and response examples across ${routeFiles.length} route files.\n`);
+  process.stdout.write(`Documented ${apiEndpoints.length} API routes with explicit request schemas, enum contracts, and response examples across ${routeFiles.length} route files.\n`);
 };
 
 void main();

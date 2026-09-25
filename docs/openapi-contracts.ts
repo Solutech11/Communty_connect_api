@@ -29,6 +29,7 @@ export interface SuccessContract {
   status: 200 | 201 | 202;
   description: string;
   example: Record<string, unknown>;
+  examples?: Record<string, { summary: string; value: Record<string, unknown> }>;
 }
 
 export type OpenApiEnumValue = string | number | boolean;
@@ -40,6 +41,137 @@ const reportRequestReasons = ["spam", "harassment", "hate", "violence", "scam", 
 const reportModelReasons = ["spam", "harassment", "hate", "hate_speech", "violence", "scam", "unsafe", "inappropriate", "misinformation", "other"] as const;
 const communityMessageReportReasons = ["spam", "harassment", "hate_speech", "unsafe", "inappropriate", "other"] as const;
 const ticketOrderStatuses = ["pending", "paid", "cancelled", "refunded"] as const;
+const objectIdResponseSchema: OpenApiSchema = { type: "string", pattern: "^[a-fA-F0-9]{24}$" };
+const dateTimeResponseSchema: OpenApiSchema = { type: "string", format: "date-time" };
+const ticketTypeResponseSchema: OpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["_id", "eventId", "title", "priceKobo", "sold", "active", "createdAt", "updatedAt"],
+  properties: {
+    _id: objectIdResponseSchema,
+    eventId: objectIdResponseSchema,
+    title: { type: "string", minLength: 2, maxLength: 80 },
+    description: { type: "string", maxLength: 300 },
+    priceKobo: { type: "integer", minimum: 0, maximum: 1_000_000_000_000 },
+    capacity: { type: "integer", minimum: 1, maximum: 1_000_000 },
+    sold: { type: "integer", minimum: 0 },
+    reserved: { type: "integer", minimum: 0, description: "May be included in a newly created ticket type; excluded from ordinary ticket-type reads." },
+    active: { type: "boolean" },
+    createdAt: dateTimeResponseSchema,
+    updatedAt: dateTimeResponseSchema,
+  },
+};
+
+const ticketEventSummarySchema: OpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["_id", "title", "startsAt", "endsAt", "venueName", "address", "state", "lga"],
+  properties: {
+    _id: objectIdResponseSchema,
+    title: { type: "string" },
+    coverImageUrl: { type: "string", format: "uri" },
+    startsAt: dateTimeResponseSchema,
+    endsAt: dateTimeResponseSchema,
+    venueName: { type: "string" },
+    address: { type: "string" },
+    state: { type: "string" },
+    lga: { type: "string" },
+  },
+};
+
+const ticketTypePriceSummarySchema: OpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["_id", "title", "priceKobo"],
+  properties: {
+    _id: objectIdResponseSchema,
+    title: { type: "string" },
+    priceKobo: { type: "integer", minimum: 0, maximum: 1_000_000_000_000 },
+  },
+};
+
+const ticketTypeNameSummarySchema: OpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["_id", "title"],
+  properties: { _id: objectIdResponseSchema, title: { type: "string" } },
+};
+
+const ticketBuyerSummarySchema: OpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["_id", "firstName", "lastName", "email"],
+  properties: {
+    _id: objectIdResponseSchema,
+    firstName: { type: "string" },
+    lastName: { type: "string" },
+    email: { type: "string", format: "email" },
+    avatarUrl: { type: "string", format: "uri" },
+  },
+};
+
+const ticketOrderBaseProperties: Record<string, OpenApiSchema> = {
+  _id: objectIdResponseSchema,
+  orderNumber: { type: "string", pattern: "^CC-\\d+-[A-F0-9]{8}$" },
+  eventId: objectIdResponseSchema,
+  ticketTypeId: objectIdResponseSchema,
+  buyerId: objectIdResponseSchema,
+  quantity: { type: "integer", minimum: 1, maximum: 20 },
+  ticketSubtotalKobo: { type: "integer", minimum: 0 },
+  platformFeeKobo: { type: "integer", minimum: 0 },
+  totalKobo: { type: "integer", minimum: 0 },
+  organizerProceedsKobo: { type: "integer", minimum: 0 },
+  status: { type: "string", enum: [...ticketOrderStatuses] },
+  paymentReference: { type: "string" },
+  idempotencyKey: { type: "string", minLength: 16, maxLength: 128 },
+  reservationExpiresAt: dateTimeResponseSchema,
+  checkedInAt: dateTimeResponseSchema,
+  checkedInBy: objectIdResponseSchema,
+  createdAt: dateTimeResponseSchema,
+  updatedAt: dateTimeResponseSchema,
+};
+const ticketOrderRequired = [
+  "_id", "orderNumber", "eventId", "ticketTypeId", "buyerId", "quantity",
+  "ticketSubtotalKobo", "platformFeeKobo", "totalKobo", "organizerProceedsKobo",
+  "status", "idempotencyKey", "createdAt", "updatedAt",
+];
+const ticketOrderResponseSchema: OpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ticketOrderRequired,
+  properties: ticketOrderBaseProperties,
+};
+const myTicketOrderResponseSchema: OpenApiSchema = {
+  ...ticketOrderResponseSchema,
+  properties: {
+    ...ticketOrderBaseProperties,
+    eventId: ticketEventSummarySchema,
+    ticketTypeId: ticketTypePriceSummarySchema,
+  },
+};
+const attendeeOrderResponseSchema: OpenApiSchema = {
+  ...ticketOrderResponseSchema,
+  required: [...ticketOrderRequired, "checkedIn", "checkedInAt"],
+  properties: {
+    ...ticketOrderBaseProperties,
+    ticketTypeId: ticketTypeNameSummarySchema,
+    buyerId: ticketBuyerSummarySchema,
+    checkedIn: { type: "boolean" },
+    checkedInAt: { type: ["string", "null"], format: "date-time" },
+  },
+};
+
+export const ticketResponseSchemaContracts: Record<string, Record<string, OpenApiSchema>> = {
+  "GET /events/{id}": { "data.ticketTypes[]": ticketTypeResponseSchema },
+  "POST /events/{id}/ticket-types": { "data.ticketType": ticketTypeResponseSchema },
+  "PATCH /events/{id}/ticket-types/{ticketTypeId}": { "data.ticketType": ticketTypeResponseSchema },
+  "POST /events/{id}/orders": { "data.order": ticketOrderResponseSchema },
+  "GET /events/{id}/attendees": { "data.attendees[]": attendeeOrderResponseSchema },
+  "POST /events/{id}/check-ins": { "data.order": ticketOrderResponseSchema },
+  "GET /tickets": { "data.tickets[]": myTicketOrderResponseSchema },
+  "GET /tickets/{orderNumber}": { "data.order": myTicketOrderResponseSchema },
+  "GET /tickets/{orderNumber}/verify": { "data.order": myTicketOrderResponseSchema },
+};
 const userStatuses = ["pending_verification", "active", "suspended", "deleted"] as const;
 // Mirrored from models/Community/CommunityMember.model.ts to keep the docs
 // generator independent from Mongoose model registration.
@@ -94,6 +226,7 @@ export const requestBodyEnumContracts: Record<string, Record<string, OpenApiEnum
 };
 
 const responseEnumContractsByObject: Record<string, Record<string, OpenApiEnumValues>> = {
+  location: { type: pointTypes },
   event: { setting: eventSettings, status: EVENT_STATUSES },
   moderation: { provider: ["groq"], verdict: ["approved", "rejected"] },
   user: {
@@ -166,6 +299,7 @@ const pluralObjectNames: Record<string, string> = {
   reports: "report",
   sessions: "session",
   transactions: "transaction",
+  tickets: "order",
   users: "user",
   eventId: "event",
   communityId: "community",
@@ -315,7 +449,9 @@ const event = {
   startsAt: "2026-09-20T16:00:00.000Z",
   endsAt: "2026-09-20T20:00:00.000Z",
   timezone: "Africa/Lagos",
+  coordinates: { type: "Point", coordinates: [3.3792, 6.5244] },
   maxCapacity: 250,
+  contactPhone: "+2348012345678",
   tags: ["technology", "networking"],
   status: "published",
   moderation: {
@@ -334,6 +470,7 @@ const event = {
   approvedAt: createdAt,
   publishedAt: createdAt,
   createdAt,
+  updatedAt: createdAt,
 };
 
 const ticketType = {
@@ -344,21 +481,60 @@ const ticketType = {
   priceKobo: 500000,
   capacity: 200,
   sold: 10,
-  reserved: 1,
   active: true,
+  createdAt,
+  updatedAt: createdAt,
 };
 
-const order = {
+const ticketEventSummary = {
+  _id: id,
+  title: event.title,
+  coverImageUrl: event.coverImageUrl,
+  startsAt: event.startsAt,
+  endsAt: event.endsAt,
+  venueName: event.venueName,
+  address: event.address,
+  state: event.state,
+  lga: event.lga,
+};
+
+const ticketTypePriceSummary = {
+  _id: secondId,
+  title: ticketType.title,
+  priceKobo: ticketType.priceKobo,
+};
+
+const orderBase = {
   _id: id,
   orderNumber: "CC-1784370000000-A1B2C3D4",
-  eventId: event,
-  ticketTypeId: ticketType,
+  eventId: id,
+  ticketTypeId: secondId,
+  buyerId: user,
   quantity: 1,
   ticketSubtotalKobo: 500000,
   platformFeeKobo: 25000,
   totalKobo: 525000,
+  organizerProceedsKobo: 500000,
   status: "paid",
+  paymentReference: "ticket_550e8400-e29b-41d4-a716-446655440000",
+  idempotencyKey: "ticket-order-550e8400-e29b-41d4",
+  reservationExpiresAt: "2026-09-20T16:20:00.000Z",
   createdAt,
+  updatedAt: createdAt,
+};
+
+const order = {
+  ...orderBase,
+  eventId: ticketEventSummary,
+  ticketTypeId: ticketTypePriceSummary,
+};
+
+const attendeeOrder = {
+  ...orderBase,
+  ticketTypeId: { _id: secondId, title: ticketType.title },
+  buyerId: { _id: user, firstName: "Ada", lastName: "Okafor", email: "ada@example.com", avatarUrl: user.avatarUrl },
+  checkedIn: true,
+  checkedInAt: createdAt,
 };
 
 const community = {
@@ -374,8 +550,15 @@ const community = {
   visibility: "public",
   membershipType: "premium",
   membershipPriceKobo: 200000,
+  joinPolicy: "approval",
+  messagePermission: "everyone",
+  membersCanCreatePosts: true,
+  membersCanInvite: false,
+  showMemberList: true,
   members: [secondId],
+  moderators: [],
   createdAt,
+  updatedAt: createdAt,
 };
 
 const transaction = {
@@ -453,8 +636,10 @@ const dispute = {
   subject: "Ticket payment needs review",
   description: "My payment succeeded but the ticket was not immediately visible.",
   status: "open",
+  priority: "normal",
   messages: [disputeMessage],
   createdAt,
+  updatedAt: createdAt,
 };
 
 const friendship = {
@@ -773,6 +958,443 @@ if (eventUpdateContract) {
   };
 }
 
+const ticketOrderContract = requestBodyContracts["POST /events/{id}/orders"];
+if (ticketOrderContract) {
+  ticketOrderContract.description = "Select an active ticket type for the event and order 1-20 tickets. Prices are server-owned; totals and platform fees are calculated from the stored price in integer kobo.";
+  ticketOrderContract.schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["ticketTypeId", "quantity"],
+    properties: {
+      ticketTypeId: objectIdResponseSchema,
+      quantity: { type: "integer", minimum: 1, maximum: 20 },
+    },
+  };
+}
+
+const ticketTypeRequestSchema: OpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    title: { type: "string", minLength: 2, maxLength: 80 },
+    description: { type: "string", maxLength: 300 },
+    priceKobo: { type: "integer", minimum: 0, maximum: 1_000_000_000_000 },
+    capacity: { type: "integer", minimum: 1, maximum: 1_000_000 },
+  },
+};
+const addTicketTypeContract = requestBodyContracts["POST /events/{id}/ticket-types"];
+if (addTicketTypeContract) {
+  addTicketTypeContract.description = "Creates a ticket tier. priceKobo is a non-negative integer in kobo; title and priceKobo are required.";
+  addTicketTypeContract.schema = {
+    ...ticketTypeRequestSchema,
+    required: ["title", "priceKobo"],
+  };
+}
+const updateTicketTypeContract = requestBodyContracts["PATCH /events/{id}/ticket-types/{ticketTypeId}"];
+if (updateTicketTypeContract) {
+  updateTicketTypeContract.description = "Updates at least one ticket tier field. priceKobo is a non-negative integer in kobo.";
+  updateTicketTypeContract.schema = { ...ticketTypeRequestSchema, minProperties: 1 };
+}
+const checkInContract = requestBodyContracts["POST /events/{id}/check-ins"];
+if (checkInContract) {
+  checkInContract.schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["qrToken"],
+    properties: { qrToken: { type: "string", minLength: 32, maxLength: 4096 } },
+  };
+}
+
+const strictObject = (
+  properties: Record<string, OpenApiSchema>,
+  required: string[] = [],
+  additionalPropertiesOrDescription: boolean | string = false,
+  allowAdditionalProperties = false,
+): OpenApiSchema => ({
+  type: "object",
+  additionalProperties: typeof additionalPropertiesOrDescription === "boolean"
+    ? additionalPropertiesOrDescription
+    : allowAdditionalProperties,
+  ...(typeof additionalPropertiesOrDescription === "string"
+    ? { description: additionalPropertiesOrDescription }
+    : {}),
+  required,
+  properties,
+});
+
+const geoPointRequestSchema: OpenApiSchema = {
+  ...strictObject({
+    type: { type: "string", const: "Point", default: "Point" },
+    coordinates: {
+      type: "array",
+      minItems: 2,
+      maxItems: 2,
+      prefixItems: [
+        { type: "number", minimum: -180, maximum: 180 },
+        { type: "number", minimum: -90, maximum: 90 },
+      ],
+    },
+  }, ["coordinates"]),
+};
+
+const reportRequestSchema: OpenApiSchema = strictObject({
+  reason: { type: "string", enum: [...reportRequestReasons] },
+  details: { type: "string", minLength: 10, maxLength: 2000 },
+}, ["reason"]);
+
+const communityRequestSchema: OpenApiSchema = strictObject({
+  name: { type: "string", minLength: 3, maxLength: 100 },
+  description: { type: "string", minLength: 20, maxLength: 2000 },
+  imageUrl: { type: "string", format: "uri" },
+  coverImageUrl: { type: "string", format: "uri" },
+  avatarImageUrl: { type: "string", format: "uri" },
+  accessCode: { type: "string", minLength: 4, maxLength: 128 },
+  category: { type: "string", minLength: 2, maxLength: 60 },
+  state: { type: "string", maxLength: 80 },
+  lga: { type: "string", maxLength: 100 },
+  visibility: { type: "string", enum: ["public", "private"], default: "public" },
+  membershipType: { type: "string", enum: ["free", "premium"], default: "free" },
+  membershipPriceKobo: { type: "integer", minimum: 0, maximum: 10_000_000_000, default: 0 },
+});
+
+const eventRequestSchema: OpenApiSchema = strictObject({
+  title: { type: "string", minLength: 4, maxLength: 140 },
+  description: { type: "string", minLength: 20, maxLength: 5000 },
+  coverImageUrl: { type: "string", format: "uri" },
+  activityType: { type: "string", minLength: 2, maxLength: 60 },
+  targetAudience: { type: "string", maxLength: 60 },
+  setting: { type: "string", enum: [...eventSettings] },
+  country: { type: "string", minLength: 2, maxLength: 80, default: "Nigeria" },
+  state: { type: "string", minLength: 2, maxLength: 80 },
+  lga: { type: "string", minLength: 2, maxLength: 100 },
+  venueName: { type: "string", minLength: 2, maxLength: 180 },
+  address: { type: "string", minLength: 5, maxLength: 300 },
+  coordinates: geoPointRequestSchema,
+  startsAt: { type: "string", format: "date-time" },
+  endsAt: { type: "string", format: "date-time" },
+  timezone: { type: "string", minLength: 1, maxLength: 100, default: "Africa/Lagos" },
+  contactPhone: { type: "string", minLength: 7, maxLength: 24 },
+  maxCapacity: { type: "integer", minimum: 1, maximum: 1_000_000 },
+  tags: {
+    type: "array",
+    maxItems: 10,
+    default: [],
+    items: { type: "string", minLength: 1, maxLength: 40 },
+  },
+}, [
+  "title", "description", "activityType", "setting", "state", "lga", "venueName",
+  "address", "startsAt", "endsAt", "maxCapacity",
+]);
+
+const ticketTypeRequestProperties: Record<string, OpenApiSchema> = {
+  title: { type: "string", minLength: 2, maxLength: 80 },
+  description: { type: "string", maxLength: 300 },
+  priceKobo: { type: "integer", minimum: 0, maximum: 10_000_000_000 },
+  capacity: { type: "integer", minimum: 1, maximum: 1_000_000 },
+};
+
+/**
+ * Full request schemas mirrored from the route Zod validators. Keeping these
+ * keyed to every documented body makes the examples useful without changing
+ * runtime validation or API behavior.
+ */
+export const requestBodySchemaContracts: Record<string, OpenApiSchema> = {
+  "POST /auth/register": strictObject({
+    firstName: { type: "string", minLength: 2, maxLength: 60 },
+    lastName: { type: "string", minLength: 2, maxLength: 60 },
+    email: { type: "string", format: "email", maxLength: 254 },
+    password: {
+      type: "string", minLength: 6, maxLength: 128,
+      pattern: "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).+$",
+    },
+    phone: { type: "string", minLength: 7, maxLength: 24 },
+    location: geoPointRequestSchema,
+  }, ["firstName", "lastName", "email", "password"]),
+  "POST /auth/verify-email": strictObject({
+    email: { type: "string", format: "email", maxLength: 254 },
+    otp: { type: "string", pattern: "^\\d{6}$", minLength: 6, maxLength: 6 },
+  }, ["email", "otp"]),
+  "POST /auth/resend-verification": strictObject({
+    email: { type: "string", format: "email", maxLength: 254 },
+  }, ["email"]),
+  "POST /auth/login": strictObject({
+    email: { type: "string", format: "email", maxLength: 254 },
+    password: { type: "string", minLength: 1, maxLength: 128 },
+  }, ["email", "password"]),
+  "POST /auth/refresh": strictObject({
+    refreshToken: { type: "string", minLength: 100, maxLength: 4096 },
+  }, ["refreshToken"]),
+  "POST /auth/logout": strictObject({
+    refreshToken: { type: "string", minLength: 100, maxLength: 4096 },
+  }, ["refreshToken"]),
+  "POST /auth/forgot-password": strictObject({
+    email: { type: "string", format: "email", maxLength: 254 },
+  }, ["email"]),
+  "POST /auth/reset-password": strictObject({
+    email: { type: "string", format: "email", maxLength: 254 },
+    otp: { type: "string", pattern: "^\\d{6}$", minLength: 6, maxLength: 6 },
+    newPassword: {
+      type: "string", minLength: 6, maxLength: 128,
+      pattern: "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).+$",
+    },
+  }, ["email", "otp", "newPassword"]),
+  "PATCH /users/me": {
+    type: "object", additionalProperties: false, minProperties: 1,
+    properties: {
+      firstName: { type: "string", minLength: 2, maxLength: 60 },
+      lastName: { type: "string", minLength: 2, maxLength: 60 },
+      phone: { type: "string", minLength: 7, maxLength: 24 },
+      bio: { type: "string", maxLength: 500 },
+      avatarUrl: { type: "string", format: "uri" },
+      country: { type: "string", maxLength: 80 },
+      state: { type: "string", maxLength: 80 },
+      lga: { type: "string", maxLength: 100 },
+      location: geoPointRequestSchema,
+      interests: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 40 } },
+      preferredSetting: { type: "string", enum: [...USER_PREFERRED_SETTINGS] },
+      preferredGroupSize: { type: "string", enum: [...USER_PREFERRED_GROUP_SIZES] },
+      participationRole: { type: "string", enum: [...USER_PARTICIPATION_ROLES] },
+      hobbies: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 40 } },
+    },
+  },
+  "PATCH /users/me/avatar": strictObject({ image: { type: "string", format: "binary" } }, ["image"]),
+  "PATCH /users/me/password": strictObject({
+    currentPassword: { type: "string", minLength: 1, maxLength: 128 },
+    newPassword: {
+      type: "string", minLength: 6, maxLength: 128,
+      pattern: "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).+$",
+    },
+  }, ["currentPassword", "newPassword"]),
+  "POST /users/me/push-tokens": strictObject({
+    token: { type: "string", pattern: "^(ExponentPushToken|ExpoPushToken)\\[[A-Za-z0-9_-]+\\]$" },
+  }, ["token"]),
+  "DELETE /users/me/push-tokens": strictObject({
+    token: { type: "string", pattern: "^(ExponentPushToken|ExpoPushToken)\\[[A-Za-z0-9_-]+\\]$" },
+  }, ["token"]),
+  "DELETE /users/me": strictObject({ password: { type: "string", minLength: 1, maxLength: 128 } }, ["password"]),
+  "POST /users/{id}/reports": reportRequestSchema,
+
+  "PUT /communities/{id}/rules": strictObject({
+    introduction: { type: "string", minLength: 1, maxLength: 500 },
+    rules: {
+      type: "array", maxItems: 50,
+      items: strictObject({
+        _id: objectIdResponseSchema,
+        title: { type: "string", minLength: 2, maxLength: 100 },
+        description: { type: "string", minLength: 2, maxLength: 1000 },
+        order: { type: "integer", minimum: 0, maximum: 1000 },
+      }, ["title", "description", "order"]),
+    },
+    consequences: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 300 } },
+  }, ["introduction", "rules", "consequences"]),
+  "PATCH /communities/{id}/settings": {
+    ...strictObject({
+      joinPolicy: { type: "string", enum: ["open", "approval", "invite_only", "access_code"] },
+      accessCode: { type: "string", minLength: 4, maxLength: 128, description: "Write-only access code; it is never returned by the API." },
+      messagePermission: { type: "string", enum: ["everyone", "moderators"] },
+      membersCanCreatePosts: { type: "boolean" },
+      membersCanInvite: { type: "boolean" },
+      showMemberList: { type: "boolean" },
+    }),
+    minProperties: 1,
+  },
+  "PATCH /communities/{id}/members/{userId}": {
+    ...strictObject({
+      role: { type: "string", enum: ["moderator", "member"] },
+      status: { type: "string", enum: ["active", "removed"] },
+    }),
+    minProperties: 1,
+  },
+  "PUT /communities/{id}/bans/{userId}": strictObject({
+    reason: { type: "string", minLength: 2, maxLength: 500 },
+    expiresAt: { type: "string", format: "date-time" },
+  }, ["reason"]),
+  "POST /communities/{id}/join-requests": strictObject({
+    message: { type: "string", maxLength: 500 },
+    accessCode: { type: "string", minLength: 4, maxLength: 128 },
+    inviteToken: { type: "string", minLength: 8, maxLength: 256 },
+  }),
+  "POST /communities/{id}/invites": strictObject({
+    expiresAt: { type: "string", format: "date-time", description: "Must be a future date and time." },
+    maxUses: { type: "integer", minimum: 1, maximum: 10_000 },
+  }, ["expiresAt"]),
+  "PATCH /communities/{id}/join-requests/{requestId}": strictObject({
+    status: { type: "string", enum: ["approved", "rejected"] },
+    note: { type: "string", maxLength: 500 },
+  }, ["status"]),
+  "POST /communities/{id}/calls": strictObject({
+    type: { type: "string", enum: ["voice", "video"] },
+    title: { type: "string", minLength: 1, maxLength: 120 },
+  }, ["type"]),
+  "POST /communities/{id}/ownership-transfer": strictObject({
+    newOwnerId: objectIdResponseSchema,
+    currentPassword: { type: "string", minLength: 1, maxLength: 128 },
+  }, ["newOwnerId"]),
+  "PUT /communities/{id}/messages/read": strictObject({ lastReadMessageId: objectIdResponseSchema }, ["lastReadMessageId"]),
+  "PATCH /communities/{id}/notification-preferences/me": strictObject({
+    level: { type: "string", enum: [...communityNotificationLevels] },
+  }, ["level"]),
+  "PATCH /communities/{id}/announcements/{announcementId}": {
+    ...strictObject({
+      text: { type: "string", minLength: 1, maxLength: 4000 },
+      imageUrl: { type: ["string", "null"], format: "uri" },
+      pinned: { type: "boolean" },
+    }),
+    minProperties: 1,
+  },
+  "PATCH /communities/{id}/messages/{messageId}": strictObject({
+    text: { type: "string", minLength: 1, maxLength: 4000 },
+  }, ["text"]),
+  "PATCH /communities/{id}/posts/{postId}": {
+    ...strictObject({
+      text: { type: "string", minLength: 1, maxLength: 4000 },
+      imageUrl: { type: ["string", "null"], format: "uri" },
+    }),
+    minProperties: 1,
+  },
+  "POST /events": eventRequestSchema,
+  "PATCH /events/{id}": {
+    ...eventRequestSchema,
+    required: [],
+    minProperties: 1,
+    properties: {
+      ...(eventRequestSchema.properties as Record<string, OpenApiSchema>),
+      startsAt: { type: "string", format: "date-time" },
+      endsAt: { type: "string", format: "date-time" },
+    },
+  },
+  "POST /events/{id}/orders": strictObject({
+    ticketTypeId: objectIdResponseSchema,
+    quantity: { type: "integer", minimum: 1, maximum: 20 },
+  }, ["ticketTypeId", "quantity"]),
+  "POST /events/{id}/ticket-types": strictObject(ticketTypeRequestProperties, ["title", "priceKobo"]),
+  "PATCH /events/{id}/ticket-types/{ticketTypeId}": {
+    ...strictObject(ticketTypeRequestProperties),
+    minProperties: 1,
+  },
+  "POST /events/{id}/check-ins": strictObject({
+    qrToken: { type: "string", minLength: 32, maxLength: 4096 },
+  }, ["qrToken"]),
+  "POST /events/{id}/reports": reportRequestSchema,
+
+  "POST /communities": communityRequestSchema,
+  "PATCH /communities/{id}": {
+    ...communityRequestSchema,
+    required: [],
+    minProperties: 1,
+  },
+  "POST /communities/{id}/posts": strictObject({
+    text: { type: "string", minLength: 1, maxLength: 4000 },
+    imageUrl: { type: "string", format: "uri" },
+  }, ["text"]),
+  "POST /communities/{id}/announcements": strictObject({
+    text: { type: "string", minLength: 1, maxLength: 4000 },
+    imageUrl: { type: "string", format: "uri" },
+  }, ["text"]),
+  "POST /communities/{id}/messages": strictObject({
+    clientMessageId: { type: "string", format: "uuid" },
+    text: { type: "string", minLength: 1, maxLength: 4000 },
+    attachmentIds: { type: "array", maxItems: 5, items: objectIdResponseSchema },
+    replyToMessageId: objectIdResponseSchema,
+  }, ["clientMessageId"], "A message requires text or at least one attachment."),
+  "POST /communities/{id}/messages/{messageId}/reports": strictObject({
+    reason: { type: "string", enum: [...communityMessageReportReasons] },
+    details: { type: "string", minLength: 1, maxLength: 2000 },
+  }, ["reason"]),
+  "POST /communities/{id}/reports": reportRequestSchema,
+
+  "PATCH /friends/requests/{id}": strictObject({
+    action: { type: "string", enum: ["accept", "decline", "reject"] },
+  }, ["action"]),
+  "POST /chat/conversations": strictObject({
+    type: { type: "string", enum: ["direct", "group", "support"] },
+    title: { type: "string", minLength: 2, maxLength: 120 },
+    participantIds: { type: "array", minItems: 1, maxItems: 99, items: objectIdResponseSchema },
+  }, ["type", "participantIds"]),
+  "POST /chat/conversations/{id}/messages": strictObject({
+    clientMessageId: { type: "string", minLength: 8, maxLength: 128 },
+    type: { type: "string", enum: ["text", "image"], default: "text" },
+    text: { type: "string", minLength: 1, maxLength: 4000 },
+    mediaUrl: { type: "string", format: "uri" },
+  }, ["clientMessageId"], "A text or mediaUrl value must be supplied."),
+
+  "POST /ai/chat": strictObject({
+    message: { type: "string", minLength: 1, maxLength: 4000 },
+    sessionId: objectIdResponseSchema,
+  }, ["message"]),
+  "POST /ai/event-copy": strictObject({
+    title: { type: "string", minLength: 2, maxLength: 140 },
+    activityType: { type: "string", minLength: 2, maxLength: 60 },
+    targetAudience: { type: "string", maxLength: 80 },
+    setting: { type: "string", maxLength: 40 },
+    details: { type: "string", maxLength: 3000 },
+  }, ["title", "activityType"]),
+  "POST /ai/event-recommendations": strictObject({
+    preferences: { type: "object", additionalProperties: true, default: {} },
+    latitude: { type: "number", minimum: -90, maximum: 90 },
+    longitude: { type: "number", minimum: -180, maximum: 180 },
+    radiusKm: { type: "number", exclusiveMinimum: 0, maximum: 500, default: 100 },
+    limit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+  }, [], "latitude and longitude must be supplied together when either is present."),
+
+  "POST /disputes": strictObject({
+    transactionId: objectIdResponseSchema,
+    category: { type: "string", enum: ["payment", "withdrawal", "transfer", "ticket", "event", "harassment", "other"] },
+    subject: { type: "string", minLength: 5, maxLength: 160 },
+    description: { type: "string", minLength: 20, maxLength: 5000 },
+  }, ["category", "subject", "description"]),
+  "POST /disputes/{id}/messages": strictObject({
+    message: { type: "string", minLength: 1, maxLength: 3000 },
+    attachments: { type: "array", maxItems: 5, items: { type: "string", format: "uri" } },
+    internal: { type: "boolean" },
+  }, ["message"]),
+  "PATCH /disputes/{id}/status": strictObject({
+    status: { type: "string", enum: [...DISPUTE_STATUSES] },
+    resolution: { type: "string", maxLength: 3000 },
+  }, ["status"]),
+
+  "POST /wallet/topups": strictObject({
+    amountKobo: { type: "integer", exclusiveMinimum: 0, maximum: 10_000_000_000 },
+  }, ["amountKobo"]),
+  "POST /wallet/bank-accounts": strictObject({
+    accountNumber: { type: "string", pattern: "^\\d{10}$", minLength: 10, maxLength: 10 },
+    bankCode: { type: "string", pattern: "^\\d{3,6}$", minLength: 3, maxLength: 6 },
+  }, ["accountNumber", "bankCode"]),
+  "POST /wallet/transfers": strictObject({
+    recipient: { type: "string", minLength: 3, maxLength: 254 },
+    amountKobo: { type: "integer", exclusiveMinimum: 0, maximum: 10_000_000_000 },
+    note: { type: "string", maxLength: 200 },
+  }, ["recipient", "amountKobo"]),
+  "POST /wallet/withdrawals": strictObject({
+    bankAccountId: objectIdResponseSchema,
+    amountKobo: { type: "integer", exclusiveMinimum: 0, maximum: 10_000_000_000 },
+  }, ["bankAccountId", "amountKobo"]),
+  "POST /wallet/withdrawals/{reference}/finalize": strictObject({
+    otp: { type: "string", pattern: "^\\d{6}$", minLength: 6, maxLength: 6 },
+  }, ["otp"]),
+  "POST /uploads/files": strictObject({
+    file: { type: "string", format: "binary" },
+    folder: { type: "string", const: "community-chat" },
+  }, ["file", "folder"]),
+  "POST /uploads/images": strictObject({
+    image: { type: "string", format: "binary" },
+    folder: { type: "string", enum: ["avatars", "events", "communities", "disputes", "chat", "uploads"], default: "uploads" },
+  }, ["image"], "One JPEG, PNG, or WebP image. Other multipart fields are accepted by the passthrough request validator.", true),
+  "POST /webhooks/paystack": {
+    type: "object",
+    additionalProperties: true,
+    required: ["event", "data"],
+    properties: {
+      event: { type: "string", description: "Paystack event name, for example charge.success." },
+      data: { type: "object", additionalProperties: true, description: "Provider event payload; fields vary by event type." },
+    },
+  },
+};
+
+export const applyRequestBodySchemaContracts = (schema: OpenApiSchema, operationKey: string): OpenApiSchema => {
+  return requestBodySchemaContracts[operationKey] || schema;
+};
+
 export const queryParameterContracts: Record<string, QueryParameterContract[]> = {
   "GET /locations/search": [
     { ...query("q", "Location search text.", { type: "string", minLength: 1, maxLength: 200 }, "Eko Hotel"), required: true },
@@ -782,7 +1404,8 @@ export const queryParameterContracts: Record<string, QueryParameterContract[]> =
     query("limit", "Maximum suggestions; larger positive values are capped at 8.", { type: "integer", minimum: 1, default: 8 }, 8),
   ],
   "GET /users/me/communities": [
-    ...paginationQuery,
+    query("page", "One-based page number (maximum 10,000).", { type: "integer", minimum: 1, maximum: 10_000, default: 1 }, 1),
+    query("limit", "Maximum communities returned per page.", { type: "integer", minimum: 1, maximum: 100, default: 20 }, 20),
     query("search", "Search community name and description.", { type: "string", maxLength: 100 }, "Lagos"),
     query("role", "Filter by viewer role.", { type: "string", enum: ["owner", "moderator", "member"] }, "member"),
     query("status", "Filter active or pending membership.", { type: "string", enum: ["pending", "active"] }, "active"),
@@ -906,20 +1529,52 @@ export const successContracts: Record<string, SuccessContract> = {
   "DELETE /communities/{id}/posts/{postId}": ok("Community post deleted", { postId: id, deletedAt: createdAt }),
   "POST /communities/{id}/messages/{messageId}/reports": ok("Community message reported", { report: { _id: id, targetType: "community_message", targetId: secondId, status: "open", createdAt } }, 201),  "POST /communities/{id}/ownership-transfer": ok("Community ownership transferred", { communityId: id, previousOwnerId: id, newOwnerId: secondId, transferredAt: createdAt }),
   "GET /events": ok("Events retrieved", { events: [event], sort: "soonest", pagination: { page: 1, limit: 20, total: 1 } }),
-  "GET /events/recommended": ok("Personalized nearby events retrieved", { events: [{ ...event, distanceKm: 4.8, recommendationScore: 0.91 }], locationUsed: { latitude: 6.5244, longitude: 3.3792 } }),
+  "GET /events/recommended": ok("Personalized upcoming events retrieved", { events: [{ ...event, hasTicket: true, distanceKm: 4.8, recommendationScore: 0.91, recommendationReasons: ["You have a ticket", "Matches your interests"] }], locationUsed: { latitude: 6.5244, longitude: 3.3792 } }),
   "GET /events/created/me": ok("Created events retrieved", { events: [event] }),
   "GET /events/{id}": ok("Event retrieved", { event, ticketTypes: [ticketType] }),
   "POST /events": ok("Event draft created", { event: { ...event, status: "draft" } }, 201),
   "PATCH /events/{id}": ok("Event updated", { event: { ...event, title: "Updated Lagos Tech Meetup 2026", status: "draft" } }),
-  "POST /events/{id}/orders": ok("Ticket checkout initialized", { order: { ...order, status: "pending" }, checkoutUrl: "https://checkout.paystack.com/example", accessCode: "example_access_code", publicKey: "pk_test_example", charge: { ticketSubtotalKobo: 500000, platformFeeKobo: 25000, totalPayableKobo: 525000 } }, 201),
+  "POST /events/{id}/orders": {
+    ...ok("Ticket checkout initialized", {
+      order: { ...orderBase, status: "pending" },
+      checkoutUrl: "https://checkout.paystack.com/example",
+      accessCode: "example_access_code",
+      publicKey: "pk_test_example",
+      charge: { ticketSubtotalKobo: 500000, platformFeeKobo: 25000, totalPayableKobo: 525000 },
+    }, 201),
+    examples: {
+      paystackCheckout: {
+        summary: "Paid ticket order awaiting payment",
+        value: {
+          success: true,
+          message: "Ticket checkout initialized",
+          data: {
+            order: { ...orderBase, status: "pending" },
+            checkoutUrl: "https://checkout.paystack.com/example",
+            accessCode: "example_access_code",
+            publicKey: "pk_test_example",
+            charge: { ticketSubtotalKobo: 500000, platformFeeKobo: 25000, totalPayableKobo: 525000 },
+          },
+        },
+      },
+      freeTicket: {
+        summary: "Free ticket issued immediately",
+        value: {
+          success: true,
+          message: "Free ticket issued",
+          data: { order: { ...orderBase, totalKobo: 0, ticketSubtotalKobo: 0, platformFeeKobo: 0, organizerProceedsKobo: 0, status: "paid" }, qrToken: "opaque-ticket-token-at-least-thirty-two-characters" },
+        },
+      },
+    },
+  },
   "POST /events/{id}/publish": ok("Event approved and published", { event }),
   "POST /events/{id}/cancel": ok("Event cancelled", { event: { ...event, status: "cancelled" } }),
   "DELETE /events/{id}": ok("Event draft deleted"),
   "POST /events/{id}/ticket-types": ok("Ticket type created", { ticketType }, 201),
   "PATCH /events/{id}/ticket-types/{ticketTypeId}": ok("Ticket type updated", { ticketType: { ...ticketType, title: "Early Bird" } }),
   "DELETE /events/{id}/ticket-types/{ticketTypeId}": ok("Ticket type removed"),
-  "GET /events/{id}/attendees": ok("Attendees retrieved", { attendees: [{ ...order, buyerId: user, checkedIn: true, checkedInAt: createdAt }], summary: { orders: 1, totalTickets: 1, checkedInTickets: 1, pendingTickets: 0 } }),
-  "POST /events/{id}/check-ins": ok("Ticket checked in", { order: { ...order, checkedInAt: createdAt } }),
+  "GET /events/{id}/attendees": ok("Attendees retrieved", { attendees: [attendeeOrder], summary: { orders: 1, totalTickets: 1, checkedInTickets: 1, pendingTickets: 0 } }),
+  "POST /events/{id}/check-ins": ok("Ticket checked in", { order: { ...orderBase, checkedInAt: createdAt } }),
   "POST /events/{id}/reports": ok("Report submitted", { report }, 201),
 
   "GET /communities": ok("Communities retrieved", { communities: [community], pagination: { page: 1, limit: 20, total: 1 } }),
@@ -994,7 +1649,13 @@ export const successContracts: Record<string, SuccessContract> = {
 export const pathParameterExamples: Record<string, { description: string; example: string; schema?: OpenApiSchema }> = {
   id: { description: "MongoDB resource identifier.", example: id, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
   userId: { description: "MongoDB user identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+  requestId: { description: "MongoDB community join-request identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+  callId: { description: "MongoDB community-call identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+  messageId: { description: "MongoDB message identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+  postId: { description: "MongoDB community-post identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+  announcementId: { description: "MongoDB announcement identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
   ticketTypeId: { description: "MongoDB ticket-type identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
-  orderNumber: { description: "Server-generated order number.", example: "CC-1784370000000-A1B2C3D4", schema: { type: "string" } },
+  emoji: { description: "Message reaction emoji or short reaction text.", example: "👍", schema: { type: "string", minLength: 1, maxLength: 32 } },
+  orderNumber: { description: "Server-generated order number.", example: "CC-1784370000000-A1B2C3D4", schema: { type: "string", minLength: 12, maxLength: 80 } },
   reference: { description: "Server-generated payment or transfer reference.", example: "topup_550e8400-e29b-41d4-a716-446655440000", schema: { type: "string", minLength: 16, maxLength: 80 } },
 };

@@ -197,6 +197,26 @@ export const rankEventRecommendations = <T extends RecommendationEvent>(input: {
     });
 };
 
+export const prioritizeTicketedRecommendations = <T extends RecommendationEvent>(
+  recommendations: Array<ScoredRecommendation<T>>,
+  ticketedEventIds: ReadonlySet<string>,
+  limit: number,
+): Array<ScoredRecommendation<T>> => {
+  const ticketed = recommendations
+    .filter((item) => ticketedEventIds.has(String(item.event._id)))
+    .sort((left, right) => {
+      const dateDifference =
+        new Date(left.event.startsAt).getTime() - new Date(right.event.startsAt).getTime();
+
+      return dateDifference || right.score - left.score;
+    });
+  const otherRecommendations = recommendations.filter(
+    (item) => !ticketedEventIds.has(String(item.event._id)),
+  );
+
+  return [...ticketed, ...otherRecommendations].slice(0, limit);
+};
+
 const buildRecommendationProfile = (
   interests: string[],
   state: string | undefined,
@@ -257,10 +277,11 @@ export const getPersonalizedEventRecommendations = async (
         ? [storedCoordinates[0] as number, storedCoordinates[1] as number]
         : undefined;
   const radiusKm = options.radiusKm || 100;
+  const now = new Date();
   // Oversample before scoring so personalization has enough nearby candidates,
   // while the hard ceiling protects MongoDB and response latency.
   const candidateLimit = Math.min(Math.max((options.limit || 20) * 10, 100), 300);
-  const baseQuery = { status: "published" as const, startsAt: { $gte: new Date() } };
+  const baseQuery = { status: "published" as const, startsAt: { $gte: now } };
 
   let candidates: RecommendationEvent[];
 
@@ -291,6 +312,27 @@ export const getPersonalizedEventRecommendations = async (
     .sort({ createdAt: -1 })
     .limit(100)
     .lean();
+  const ticketedEventObjectIds = (await TicketOrderModel.distinct("eventId", {
+    buyerId: user._id,
+    status: "paid",
+  })).map((eventId) => new Types.ObjectId(String(eventId)));
+  const ticketedEventIds = new Set(ticketedEventObjectIds.map(String));
+  const upcomingTicketedEvents = ticketedEventObjectIds.length > 0
+    ? await EventModel.find({ ...baseQuery, _id: { $in: ticketedEventObjectIds } })
+        .sort({ startsAt: 1 })
+        .limit(options.limit || 20)
+        .lean() as unknown as RecommendationEvent[]
+    : [];
+  const candidateById = new Map(candidates.map((event) => [String(event._id), event]));
+
+  // A ticket is an ongoing commitment, so keep its upcoming event visible even
+  // when it falls outside the normal distance or oversampled candidate pool.
+  for (const event of upcomingTicketedEvents) {
+    if (!candidateById.has(String(event._id))) {
+      candidateById.set(String(event._id), event);
+    }
+  }
+  const recommendationCandidates = [...candidateById.values()];
   const orderWeights: Record<string, number> = {};
 
   for (const order of paidOrders) {
@@ -304,7 +346,7 @@ export const getPersonalizedEventRecommendations = async (
         .select("activityType targetAudience tags state lga startsAt coordinates")
         .lean() as unknown as RecommendationEvent[]
     : [];
-  const candidateIds = candidates.map((event) => event._id);
+  const candidateIds = recommendationCandidates.map((event) => event._id);
   const popularityRows = candidateIds.length > 0
     ? await TicketOrderModel.aggregate<{ _id: Types.ObjectId; attendees: number }>([
         { $match: { eventId: { $in: candidateIds }, status: "paid" } },
@@ -322,19 +364,27 @@ export const getPersonalizedEventRecommendations = async (
     orderWeights,
   );
   const ranked = rankEventRecommendations({
-    events: candidates,
+    events: recommendationCandidates,
     profile,
     userCoordinates,
     radiusKm,
     popularityByEventId,
-  }).slice(0, options.limit || 20);
+    now,
+  });
+  const selectedRecommendations = prioritizeTicketedRecommendations(
+    ranked,
+    ticketedEventIds,
+    options.limit || 20,
+  );
   // Populate after ranking so creator joins do not complicate the geospatial
   // pipeline or alter the already-computed recommendation order.
   const populated = await EventModel.populate(
-    ranked.map((item) => item.event),
+    selectedRecommendations.map((item) => item.event),
     { path: "creatorId", select: "firstName lastName avatarUrl" },
   ) as unknown as RecommendationEvent[];
-  const rankingById = new Map(ranked.map((item) => [String(item.event._id), item]));
+  const rankingById = new Map(
+    selectedRecommendations.map((item) => [String(item.event._id), item]),
+  );
 
   return {
     model: EVENT_RECOMMENDATION_MODEL,
@@ -345,9 +395,12 @@ export const getPersonalizedEventRecommendations = async (
       const ranking = rankingById.get(String(event._id));
       return {
         ...event,
+        hasTicket: ticketedEventIds.has(String(event._id)),
         recommendationScore: ranking?.score || 0,
         distanceKm: ranking?.distanceKm,
-        recommendationReasons: ranking?.reasons || [],
+        recommendationReasons: ticketedEventIds.has(String(event._id))
+          ? ["You have a ticket", ...(ranking?.reasons || [])].slice(0, 3)
+          : ranking?.reasons || [],
       };
     }),
   };

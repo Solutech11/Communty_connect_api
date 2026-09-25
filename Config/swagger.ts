@@ -2,12 +2,14 @@ import { env } from "./env";
 import { apiEndpoints } from "../docs/endpoint-registry";
 import {
   applyRequestBodyEnumContracts,
+  applyRequestBodySchemaContracts,
   applyResponseEnumContracts,
   inferSchema,
   pathParameterExamples,
   queryParameterContracts,
   requestBodyContracts,
   successContracts,
+  ticketResponseSchemaContracts,
 } from "../docs/openapi-contracts";
 
 type OpenApiPathItem = Record<string, unknown>;
@@ -15,6 +17,36 @@ const paths: Record<string, OpenApiPathItem> = {};
 
 const operationKey = (method: string, path: string): string => {
   return `${method.toUpperCase()} ${path}`;
+};
+
+const applyTicketResponseSchemaContracts = (
+  schema: Record<string, unknown>,
+  contracts: Record<string, Record<string, unknown>> | undefined,
+): void => {
+  for (const [path, override] of Object.entries(contracts || {})) {
+    const segments = path.split(".");
+    let current = schema;
+
+    segments.forEach((segment, index) => {
+      const properties = current.properties as Record<string, Record<string, unknown>>;
+      const isArray = segment.endsWith("[]");
+      const property = isArray ? segment.slice(0, -2) : segment;
+      const last = index === segments.length - 1;
+
+      if (last && isArray) {
+        properties[property] = { ...properties[property], items: override };
+        return;
+      }
+
+      if (last) {
+        properties[property] = override;
+        return;
+      }
+
+      const child = properties[property]!;
+      current = isArray ? child.items as Record<string, unknown> : child;
+    });
+  }
 };
 
 for (const endpoint of apiEndpoints) {
@@ -33,7 +65,9 @@ for (const endpoint of apiEndpoints) {
       in: "path",
       required: true,
       description: contract?.description || "Resource identifier.",
-      schema: contract?.schema || { type: "string" },
+      schema: name === "orderNumber" && endpoint.path.startsWith("/tickets/")
+        ? { ...(contract?.schema || { type: "string" }), pattern: "^CC-\\d+-[A-F0-9]{8}$" }
+        : contract?.schema || { type: "string" },
       ...(contract?.example ? {
         example: name === "orderNumber" && endpoint.path.includes("membership-orders")
           ? "CCM-1784370000000-A1B2C3D4"
@@ -88,6 +122,60 @@ for (const endpoint of apiEndpoints) {
         required: Object.keys(success.example),
       };
 
+  applyTicketResponseSchemaContracts(successSchema, ticketResponseSchemaContracts[key]);
+
+  if (key === "POST /events/{id}/orders") {
+    const dataSchema = (successSchema.properties as Record<string, Record<string, unknown>>).data!;
+    const rawOrderSchema = ticketResponseSchemaContracts[key]?.["data.order"];
+    if (!rawOrderSchema) throw new Error("Missing ticket order response schema contract");
+
+    dataSchema.oneOf = [
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["order", "checkoutUrl", "accessCode", "publicKey", "charge"],
+        properties: {
+          order: rawOrderSchema,
+          checkoutUrl: { type: "string", format: "uri" },
+          accessCode: { type: "string" },
+          publicKey: { type: "string" },
+          charge: {
+            type: "object",
+            additionalProperties: false,
+            required: ["ticketSubtotalKobo", "platformFeeKobo", "totalPayableKobo"],
+            properties: {
+              ticketSubtotalKobo: { type: "integer", minimum: 0 },
+              platformFeeKobo: { type: "integer", minimum: 0 },
+              totalPayableKobo: { type: "integer", minimum: 0 },
+            },
+          },
+        },
+      },
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["order", "qrToken"],
+        properties: {
+          order: rawOrderSchema,
+          qrToken: { type: "string", minLength: 32, maxLength: 4096 },
+        },
+      },
+    ];
+    delete dataSchema.properties;
+    delete dataSchema.required;
+  }
+
+  const idempotentOrderExample = key === "POST /events/{id}/orders"
+    ? {
+        success: true,
+        message: "Ticket order already initialized",
+        data: {
+          order: success.example.data && (success.example.data as Record<string, unknown>).order,
+          checkoutUrl: success.example.data && (success.example.data as Record<string, unknown>).checkoutUrl,
+        },
+      }
+    : undefined;
+
   if (key === "GET /locations/search") {
     const data = (successSchema.properties as Record<string, Record<string, unknown>>).data!;
     const results = (data.properties as Record<string, Record<string, unknown>>).results!;
@@ -131,10 +219,43 @@ for (const endpoint of apiEndpoints) {
         content: {
           "application/json": {
             schema: successSchema,
-            example: success.example,
+            ...(success.examples ? {
+              examples: Object.fromEntries(Object.entries(success.examples).map(([name, example]) => [name, {
+                summary: example.summary,
+                value: example.value,
+              }])),
+            } : { example: success.example }),
           },
         },
       },
+      ...(idempotentOrderExample ? {
+        "200": {
+          description: "An idempotent retry returns the existing order and its checkout URL when available.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["success", "message", "data"],
+                properties: {
+                  success: { type: "boolean", const: true },
+                  message: { type: "string" },
+                  data: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["order"],
+                    properties: {
+                      order: ticketResponseSchemaContracts[key]?.["data.order"],
+                      checkoutUrl: { type: "string", format: "uri" },
+                    },
+                  },
+                },
+              },
+              example: idempotentOrderExample,
+            },
+          },
+        },
+      } : {}),
       ...(pendingReviewExample ? {
         "202": {
           description: "Event remains pending for manual review because Groq moderation is unavailable.",
@@ -174,7 +295,10 @@ for (const endpoint of apiEndpoints) {
       description: body.description,
       content: {
         [body.contentType]: {
-          schema: applyRequestBodyEnumContracts(body.schema, key),
+          schema: applyRequestBodyEnumContracts(
+            applyRequestBodySchemaContracts(body.schema, key),
+            key,
+          ),
           example: body.example,
         },
       },
