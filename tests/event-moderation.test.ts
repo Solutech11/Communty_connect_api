@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import "./test-env";
 import {
+  createTestingAutoApproval,
   isModeratableEventImageUrl,
   mapTicketTypesForModeration,
   markUnreviewableEventImage,
@@ -52,6 +53,14 @@ test("only secure Cloudinary cover images are sent to the vision provider", () =
   );
   assert.equal(isModeratableEventImageUrl("http://res.cloudinary.com/example/event.webp"), false);
   assert.equal(isModeratableEventImageUrl("https://example.com/event.webp"), false);
+});
+
+test("testing auto-approval marks every moderation check approved without Groq", () => {
+  const result = createTestingAutoApproval();
+
+  assert.equal(result.verdict, "approved");
+  assert.equal(result.model, "testing-auto-approval");
+  assert.ok(Object.values(result.checks).every((check) => check.acceptable));
 });
 
 test("moderation receives the attendee-facing naira price instead of stored kobo", () => {

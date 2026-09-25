@@ -14,6 +14,7 @@ process.env.CLOUDINARY_API_SECRET = "test";
 process.env.ZEPTOMAIL_SEND_MAIL_TOKEN = "test";
 process.env.MAIL_FROM_ADDRESS = "test@example.com";
 process.env.GROQ_API_KEY = "test";
+process.env.EVENT_AUTO_APPROVE_FOR_TESTING = "false";
 process.env.GEOAPIFY_API_KEY = "test-key";
 process.env.LOG_LEVEL = "silent";
 process.env.DEPOSIT_CHARGE_BPS = "100";

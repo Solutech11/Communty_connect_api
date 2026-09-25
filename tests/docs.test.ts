@@ -276,7 +276,7 @@ test("success response schemas expose enums for documented model fields", () => 
     ["POST /auth/verify-email", "data.user.preferredSetting", ["indoor", "outdoor"]],
     ["POST /events", "data.event.status", ["draft", "pending_approval", "published", "rejected", "deactivated", "cancelled", "completed"]],
     ["POST /events", "data.event.setting", ["indoor", "outdoor", "online", "hybrid"]],
-    ["POST /events", "data.event.moderation.provider", ["groq"]],
+    ["POST /events", "data.event.moderation.provider", ["groq", "test_override"]],
     ["POST /events", "data.event.moderation.verdict", ["approved", "rejected"]],
     ["GET /events", "data.events[].moderation.verdict", ["approved", "rejected"]],
     ["POST /communities", "data.community.membershipType", ["free", "premium"]],

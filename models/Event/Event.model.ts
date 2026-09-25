@@ -11,7 +11,7 @@ const moderationCheckSchema = new Schema(
 
 const eventModerationSchema = new Schema(
   {
-    provider: { type: String, enum: ["groq"], required: true },
+    provider: { type: String, enum: ["groq", "test_override"], required: true },
     model: { type: String, required: true, maxlength: 120 },
     verdict: { type: String, enum: ["approved", "rejected"], required: true },
     reviewedAt: { type: Date, required: true },

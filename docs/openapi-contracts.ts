@@ -228,7 +228,7 @@ export const requestBodyEnumContracts: Record<string, Record<string, OpenApiEnum
 const responseEnumContractsByObject: Record<string, Record<string, OpenApiEnumValues>> = {
   location: { type: pointTypes },
   event: { setting: eventSettings, status: EVENT_STATUSES },
-  moderation: { provider: ["groq"], verdict: ["approved", "rejected"] },
+  moderation: { provider: ["groq", "test_override"], verdict: ["approved", "rejected"] },
   user: {
     role: USER_ROLES,
     status: userStatuses,

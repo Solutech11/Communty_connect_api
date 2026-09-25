@@ -306,6 +306,11 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 - Distance has the highest weight, so personalization cannot bury genuinely nearby events. The response includes score, distance, and human-readable reasons.
 - This ranking runs locally in TypeScript/MongoDB and does not call Groq.
 
+## Event Moderation Testing
+
+- Set `EVENT_AUTO_APPROVE_FOR_TESTING=true` in a development or test environment to skip Groq moderation and automatically approve events when they are submitted for publishing. Leave it unset or set it to `false` to use normal moderation.
+- The API refuses to start in production when this override is enabled. Event date and ticket-type validation still applies.
+
 ## Security Notes
 
 - Development accepts browser origins to support local and LAN testing. Production accepts only the explicit `FRONTEND_URLS` allowlist.

@@ -135,6 +135,18 @@ export interface EventModerationResult {
   model: string;
 }
 
+export const createTestingAutoApproval = (): EventModerationResult => ({
+  verdict: "approved",
+  reasons: ["Automated moderation bypassed by testing configuration."],
+  checks: {
+    content: { acceptable: true, reasons: [] },
+    image: { acceptable: true, reasons: [] },
+    pricing: { acceptable: true, reasons: [] },
+    communityGuidelines: { acceptable: true, reasons: [] },
+  },
+  model: "testing-auto-approval",
+});
+
 export const mapTicketTypesForModeration = (
   ticketTypes: EventModerationInput["ticketTypes"],
 ) => ticketTypes.map(({ priceKobo, ...ticketType }) => ({

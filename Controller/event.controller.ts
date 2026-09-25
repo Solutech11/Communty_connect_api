@@ -2,10 +2,13 @@ import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
 import { getPersonalizedEventRecommendations } from "../Community_AI/EventRecommendation.algorithm";
 import {
+  createTestingAutoApproval,
   isModeratableEventImageUrl,
   markUnreviewableEventImage,
   moderateEventWithGroq,
+  type EventModerationResult,
 } from "../Community_AI/Groq";
+import { env } from "../Config/env";
 import { UserModel } from "../models/Auth/User.model";
 import { EventModel } from "../models/Event/Event.model";
 import { TicketOrderModel } from "../models/Event/TicketOrder.model";
@@ -316,35 +319,40 @@ export const publishEvent = async (request: Request, response: Response): Promis
       : "unreviewable";
 
   try {
-    let moderation = await moderateEventWithGroq({
-      title: pendingEvent.title,
-      description: pendingEvent.description,
-      activityType: pendingEvent.activityType,
-      targetAudience: pendingEvent.targetAudience ?? undefined,
-      setting: pendingEvent.setting,
-      country: pendingEvent.country,
-      state: pendingEvent.state,
-      lga: pendingEvent.lga,
-      venueName: pendingEvent.venueName,
-      address: pendingEvent.address,
-      startsAt: pendingEvent.startsAt.toISOString(),
-      endsAt: pendingEvent.endsAt.toISOString(),
-      maxCapacity: pendingEvent.maxCapacity,
-      tags: pendingEvent.tags,
-      coverImageUrl: imageReviewStatus === "included"
-        ? pendingEvent.coverImageUrl ?? undefined
-        : undefined,
-      imageReviewStatus,
-      ticketTypes: ticketTypes.map((ticketType) => ({
-        title: ticketType.title,
-        description: ticketType.description ?? undefined,
-        priceKobo: ticketType.priceKobo,
-        capacity: ticketType.capacity ?? undefined,
-      })),
-    });
+    let moderation: EventModerationResult;
+    if (env.EVENT_AUTO_APPROVE_FOR_TESTING) {
+      moderation = createTestingAutoApproval();
+    } else {
+      moderation = await moderateEventWithGroq({
+        title: pendingEvent.title,
+        description: pendingEvent.description,
+        activityType: pendingEvent.activityType,
+        targetAudience: pendingEvent.targetAudience ?? undefined,
+        setting: pendingEvent.setting,
+        country: pendingEvent.country,
+        state: pendingEvent.state,
+        lga: pendingEvent.lga,
+        venueName: pendingEvent.venueName,
+        address: pendingEvent.address,
+        startsAt: pendingEvent.startsAt.toISOString(),
+        endsAt: pendingEvent.endsAt.toISOString(),
+        maxCapacity: pendingEvent.maxCapacity,
+        tags: pendingEvent.tags,
+        coverImageUrl: imageReviewStatus === "included"
+          ? pendingEvent.coverImageUrl ?? undefined
+          : undefined,
+        imageReviewStatus,
+        ticketTypes: ticketTypes.map((ticketType) => ({
+          title: ticketType.title,
+          description: ticketType.description ?? undefined,
+          priceKobo: ticketType.priceKobo,
+          capacity: ticketType.capacity ?? undefined,
+        })),
+      });
 
-    if (imageReviewStatus === "unreviewable") {
-      moderation = markUnreviewableEventImage(moderation);
+      if (imageReviewStatus === "unreviewable") {
+        moderation = markUnreviewableEventImage(moderation);
+      }
     }
 
     const reviewedAt = new Date();
@@ -359,7 +367,7 @@ export const publishEvent = async (request: Request, response: Response): Promis
         $set: {
           status: approved ? "published" : "rejected",
           moderation: {
-            provider: "groq",
+            provider: env.EVENT_AUTO_APPROVE_FOR_TESTING ? "test_override" : "groq",
             model: moderation.model,
             verdict: moderation.verdict,
             reviewedAt,
@@ -401,7 +409,9 @@ export const publishEvent = async (request: Request, response: Response): Promis
       });
     }
 
-    const organizer = await UserModel.findById(request.auth?.id).select("firstName email").lean();
+    const organizer = env.EVENT_AUTO_APPROVE_FOR_TESTING
+      ? null
+      : await UserModel.findById(request.auth?.id).select("firstName email").lean();
     if (organizer) {
       try {
         await sendEmail({
