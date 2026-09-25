@@ -22,6 +22,7 @@ import {
 import { withRedisLock } from "../utils/redisLock.utils";
 import { calculatePlatformCharge, recordPlatformEarning } from "../utils/platformCharge.utils";
 import { logger } from "../utils/logger.utils";
+import { matchesPaystackSettlement } from "../utils/paystackSettlement.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const financialReference = (prefix: string): string => {
@@ -162,14 +163,17 @@ export const verifyTopup = async (request: Request, response: Response): Promise
 
   const provider = await verifyPaystackTransaction((request.params.reference as string));
   const totalPayableKobo = transaction.amountKobo + (transaction.feeKobo || 0);
+  const providerAmountKobo = provider.amount;
+  const amountMatches = matchesPaystackSettlement(providerAmountKobo, provider.fees, totalPayableKobo);
 
-  if (provider.status !== "success" || provider.amount !== totalPayableKobo) {
-    if (provider.amount !== totalPayableKobo) {
+  if (provider.status !== "success" || typeof providerAmountKobo !== "number" || !amountMatches) {
+    if (!amountMatches) {
       logger.warn({
         operation: "verify_wallet_topup",
         transactionId: transaction._id.toString(),
         expectedAmountKobo: totalPayableKobo,
-        providerAmountKobo: provider.amount,
+        providerAmountKobo,
+        paystackFeeKobo: provider.fees,
         walletCreditKobo: transaction.amountKobo,
         depositFeeKobo: transaction.feeKobo || 0,
       }, "Paystack top-up amount mismatch");
@@ -177,12 +181,16 @@ export const verifyTopup = async (request: Request, response: Response): Promise
     throw new AppError(409, "Payment is not confirmed", "PAYMENT_NOT_CONFIRMED");
   }
 
-  await creditVerifiedTopup(transaction.reference, provider.amount);
+  await creditVerifiedTopup(transaction.reference, providerAmountKobo, provider.fees);
   const refreshed = await TransactionModel.findById(transaction._id);
   return sendSuccess(response, 200, "Top-up verified", { transaction: refreshed });
 };
 
-export const creditVerifiedTopup = async (reference: string, providerAmount?: number): Promise<void> => {
+export const creditVerifiedTopup = async (
+  reference: string,
+  providerAmount: number,
+  paystackFeeKobo?: number | null,
+): Promise<void> => {
   const session = await mongoose.startSession();
 
   try {
@@ -199,12 +207,13 @@ export const creditVerifiedTopup = async (reference: string, providerAmount?: nu
       const feeKobo = transaction.feeKobo || 0;
       const totalPayableKobo = transaction.amountKobo + feeKobo;
 
-      if (providerAmount !== undefined && providerAmount !== totalPayableKobo) {
+      if (!matchesPaystackSettlement(providerAmount, paystackFeeKobo, totalPayableKobo)) {
         logger.warn({
           operation: "credit_verified_topup",
           transactionId: transaction._id.toString(),
           expectedAmountKobo: totalPayableKobo,
           providerAmountKobo: providerAmount,
+          paystackFeeKobo,
           walletCreditKobo: transaction.amountKobo,
           depositFeeKobo: feeKobo,
         }, "Paystack top-up amount mismatch");

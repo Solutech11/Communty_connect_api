@@ -141,7 +141,7 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | POST | `/events/{id}/reports` | Yes | Report a published event for moderation |
 | GET | `/tickets` | Yes | List my ticket orders |
 | GET | `/tickets/{orderNumber}` | Yes | Get owned paid ticket and QR token |
-| GET | `/tickets/{orderNumber}/verify` | Yes | Verify exact Paystack payment and issue ticket |
+| GET | `/tickets/{orderNumber}/verify` | Yes | Verify Paystack settlement amount and issue ticket |
 
 `GET /events/{id}` returns active ticket tiers at `data.ticketTypes`. Each tier exposes its MongoDB `_id`, title, optional description and capacity, `priceKobo`, sold count, active flag, and timestamps. Ticket purchase prices use integer kobo in the API; the mobile UI converts them to naira for display. `/tickets` returns `data.tickets` with full order fields plus populated event and ticket-type summaries.
 
@@ -155,7 +155,7 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | PATCH | `/communities/{id}` | Yes | Update owned community |
 | POST | `/communities/{id}/members` | Yes | Join a free public community |
 | POST | `/communities/{id}/membership-orders` | Yes + key | Initialize premium membership checkout and platform charge |
-| GET | `/communities/membership-orders/{orderNumber}/verify` | Yes | Verify payment and activate premium membership |
+| GET | `/communities/membership-orders/{orderNumber}/verify` | Yes | Verify Paystack settlement and activate premium membership |
 | DELETE | `/communities/{id}/members/me` | Yes | Leave community (not owner) |
 | GET | `/communities/{id}/members` | Yes | List safe member profiles |
 | GET | `/communities/{id}/posts` | Yes | List paginated room posts with author profiles |
@@ -294,7 +294,8 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 1. Configure `POST https://your-api.example.com/api/v1/webhooks/paystack` in Paystack.
 2. Keep the Paystack secret only on the backend. The public key may be returned to the app for checkout.
 3. Leave raw-body capture enabled. The webhook compares `x-paystack-signature` with HMAC-SHA512 in constant time.
-4. Top-ups are credited only after signed `charge.success` or an authenticated server-to-server verification with exact amount matching.
+4. Top-ups are credited only after signed `charge.success` or an authenticated server-to-server verification. The Paystack amount must equal the initialized wallet credit plus platform deposit charge, or the charged amount less Paystack's reported processing fee must equal it when Paystack's "Pass fees to customers" setting is enabled.
+   The same settlement rule applies to paid ticket and premium community orders before their inventory or memberships are finalized.
 5. Withdrawals use stored Paystack recipient codes, unique references, reserved wallet funds, and final `transfer.success`, `transfer.failed`, or `transfer.reversed` webhooks.
 6. If Paystack transfer confirmation is enabled, call the finalize route with the user's OTP. Never log the OTP.
 

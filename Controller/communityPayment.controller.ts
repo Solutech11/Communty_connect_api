@@ -13,6 +13,7 @@ import {
   initializePaystackTransaction,
   verifyPaystackTransaction,
 } from "../utils/paystack.utils";
+import { matchesPaystackSettlement } from "../utils/paystackSettlement.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
 import { sendSuccess } from "../utils/response.utils";
 
@@ -151,7 +152,8 @@ export const createCommunityMembershipOrder = async (
 
 export const completeCommunityMembershipOrder = async (
   reference: string,
-  providerAmount?: number,
+  providerAmount: number,
+  paystackFeeKobo?: number | null,
 ): Promise<void> => {
   const session = await mongoose.startSession();
 
@@ -166,7 +168,7 @@ export const completeCommunityMembershipOrder = async (
         return;
       }
 
-      if (providerAmount !== undefined && providerAmount !== order.grossAmountKobo) {
+      if (!matchesPaystackSettlement(providerAmount, paystackFeeKobo, order.grossAmountKobo)) {
         throw new AppError(
           409,
           "Community membership payment amount does not match",
@@ -246,12 +248,17 @@ export const verifyCommunityMembershipOrder = async (
 
   if (order.status !== "paid") {
     const provider = await verifyPaystackTransaction(order.paymentReference);
+    const providerAmountKobo = provider.amount;
 
-    if (provider.status !== "success" || provider.amount !== order.grossAmountKobo) {
+    if (
+      provider.status !== "success"
+      || typeof providerAmountKobo !== "number"
+      || !matchesPaystackSettlement(providerAmountKobo, provider.fees, order.grossAmountKobo)
+    ) {
       throw new AppError(409, "Membership payment is not confirmed", "PAYMENT_NOT_CONFIRMED");
     }
 
-    await completeCommunityMembershipOrder(order.paymentReference, provider.amount);
+    await completeCommunityMembershipOrder(order.paymentReference, providerAmountKobo, provider.fees);
   }
 
   const refreshed = await CommunityMembershipOrderModel.findById(order._id)

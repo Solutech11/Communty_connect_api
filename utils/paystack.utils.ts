@@ -14,6 +14,7 @@ export interface PaystackTransactionData {
   access_code: string;
   reference: string;
   amount?: number;
+  fees?: number | null;
   currency?: string;
   status?: string;
   metadata?: Record<string, unknown>;

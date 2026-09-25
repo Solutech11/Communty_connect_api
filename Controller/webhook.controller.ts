@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { WebhookEventModel } from "../models/Webhook/WebhookEvent.model";
 import { AppError } from "../utils/AppError";
+import { verifyPaystackTransaction } from "../utils/paystack.utils";
 import {
   createPaystackSignature,
   secureEqual,
@@ -21,10 +22,35 @@ const paystackWebhookSchema = z.object({
     id: z.union([z.number(), z.string()]).optional(),
     reference: z.string().min(1).max(100).optional(),
     amount: z.number().int().nonnegative().optional(),
+    fees: z.number().int().nonnegative().nullable().optional(),
     status: z.string().max(60).optional(),
     transfer_code: z.string().max(100).optional(),
   }).passthrough(),
 }).passthrough();
+
+const resolvePaystackSettlement = async (
+  reference: string,
+  webhookAmountKobo: number,
+  webhookFeeKobo: number | null | undefined,
+): Promise<{ amountKobo: number; feeKobo: number | null | undefined }> => {
+  if (typeof webhookFeeKobo === "number") {
+    return { amountKobo: webhookAmountKobo, feeKobo: webhookFeeKobo };
+  }
+
+  // Paystack webhook payloads may omit the fee. Fetch its authoritative
+  // transaction details so customer-paid processing fees can be reconciled.
+  const verified = await verifyPaystackTransaction(reference);
+  if (
+    verified.status !== "success"
+    || typeof verified.amount !== "number"
+    || !Number.isSafeInteger(verified.amount)
+    || verified.amount !== webhookAmountKobo
+  ) {
+    throw new AppError(409, "Paystack payment could not be reconciled", "PAYMENT_NOT_CONFIRMED");
+  }
+
+  return { amountKobo: verified.amount, feeKobo: verified.fees };
+};
 
 export const paystackWebhook = async (request: Request, response: Response): Promise<Response> => {
   const signature = request.header("x-paystack-signature");
@@ -88,16 +114,28 @@ export const paystackWebhook = async (request: Request, response: Response): Pro
 
   try {
     if (payload.event === "charge.success" && reference) {
-      if (payload.data.amount === undefined) {
-        throw new AppError(400, "Webhook payment amount is required", "WEBHOOK_AMOUNT_REQUIRED");
-      }
+      if (
+        reference.startsWith("ticket_")
+        || reference.startsWith("community_")
+        || reference.startsWith("topup_")
+      ) {
+        if (payload.data.amount === undefined || !Number.isSafeInteger(payload.data.amount)) {
+          throw new AppError(400, "Webhook payment amount is required", "WEBHOOK_AMOUNT_REQUIRED");
+        }
 
-      if (reference.startsWith("ticket_")) {
-        await completeTicketOrder(reference, payload.data.amount);
-      } else if (reference.startsWith("community_")) {
-        await completeCommunityMembershipOrder(reference, payload.data.amount);
-      } else {
-        await creditVerifiedTopup(reference, payload.data.amount);
+        const settlement = await resolvePaystackSettlement(
+          reference,
+          payload.data.amount,
+          payload.data.fees,
+        );
+
+        if (reference.startsWith("ticket_")) {
+          await completeTicketOrder(reference, settlement.amountKobo, settlement.feeKobo);
+        } else if (reference.startsWith("community_")) {
+          await completeCommunityMembershipOrder(reference, settlement.amountKobo, settlement.feeKobo);
+        } else {
+          await creditVerifiedTopup(reference, settlement.amountKobo, settlement.feeKobo);
+        }
       }
     } else if (payload.event === "transfer.success" && reference) {
       await completeWithdrawal(reference);

@@ -12,6 +12,9 @@ const envSchema = z.object({
   FRONTEND_URLS: z.string().default("http://localhost:8081,http://localhost:19006"),
   TRUST_PROXY: z.coerce.number().int().min(0).max(3).default(1),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  LOG_REQUEST_BODIES: z.enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   MONGODB_URI: z.string().min(1),
   REDIS_URL: z.string().min(1),
   JWT_ACCESS_SECRET: z.string().min(64),

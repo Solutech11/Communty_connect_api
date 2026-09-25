@@ -17,6 +17,7 @@ process.env.GROQ_API_KEY = "test";
 process.env.EVENT_AUTO_APPROVE_FOR_TESTING = "false";
 process.env.GEOAPIFY_API_KEY = "test-key";
 process.env.LOG_LEVEL = "silent";
+process.env.LOG_REQUEST_BODIES = "false";
 process.env.DEPOSIT_CHARGE_BPS = "100";
 process.env.WITHDRAWAL_CHARGE_BPS = "100";
 process.env.TICKET_CHARGE_BPS = "500";

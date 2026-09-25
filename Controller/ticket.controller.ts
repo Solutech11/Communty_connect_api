@@ -20,6 +20,7 @@ import {
   initializePaystackTransaction,
   verifyPaystackTransaction,
 } from "../utils/paystack.utils";
+import { matchesPaystackSettlement } from "../utils/paystackSettlement.utils";
 import { sendSuccess } from "../utils/response.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
 import { calculatePlatformCharge, recordPlatformEarning } from "../utils/platformCharge.utils";
@@ -195,7 +196,8 @@ export const createTicketOrder = async (
 
 export const completeTicketOrder = async (
   reference: string,
-  providerAmount?: number,
+  providerAmount: number,
+  paystackFeeKobo?: number | null,
 ): Promise<void> => {
   const session = await mongoose.startSession();
   let paidOrderId: string | undefined;
@@ -212,7 +214,7 @@ export const completeTicketOrder = async (
         return;
       }
 
-      if (providerAmount !== undefined && providerAmount !== order.totalKobo) {
+      if (!matchesPaystackSettlement(providerAmount, paystackFeeKobo, order.totalKobo)) {
         throw new AppError(409, "Ticket payment amount does not match", "PAYMENT_AMOUNT_MISMATCH");
       }
 
@@ -308,12 +310,17 @@ export const verifyTicketOrder = async (
 
   if (order.status !== "paid") {
     const provider = await verifyPaystackTransaction(order.paymentReference as string);
+    const providerAmountKobo = provider.amount;
 
-    if (provider.status !== "success" || provider.amount !== order.totalKobo) {
+    if (
+      provider.status !== "success"
+      || typeof providerAmountKobo !== "number"
+      || !matchesPaystackSettlement(providerAmountKobo, provider.fees, order.totalKobo)
+    ) {
       throw new AppError(409, "Ticket payment is not confirmed", "PAYMENT_NOT_CONFIRMED");
     }
 
-    await completeTicketOrder(order.paymentReference as string, provider.amount);
+    await completeTicketOrder(order.paymentReference as string, providerAmountKobo, provider.fees);
   }
 
   return getTicketOrder(request, response);
