@@ -23,6 +23,7 @@ import { withRedisLock } from "../utils/redisLock.utils";
 import { calculatePlatformCharge, recordPlatformEarning } from "../utils/platformCharge.utils";
 import { logger } from "../utils/logger.utils";
 import { matchesPaystackSettlement } from "../utils/paystackSettlement.utils";
+import { formatNaira, sendPaymentReceiptEmail } from "../utils/paymentEmail.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const financialReference = (prefix: string): string => {
@@ -192,9 +193,17 @@ export const creditVerifiedTopup = async (
   paystackFeeKobo?: number | null,
 ): Promise<void> => {
   const session = await mongoose.startSession();
+  let receipt: {
+    userId: string;
+    walletCreditKobo: number;
+    depositFeeKobo: number;
+    amountPaidKobo: number;
+    paystackFeeKobo: number;
+  } | undefined;
 
   try {
     await session.withTransaction(async () => {
+      receipt = undefined;
       const transaction = await TransactionModel.findOne({
         providerReference: reference,
         type: "topup",
@@ -243,9 +252,33 @@ export const creditVerifiedTopup = async (
         netAmountKobo: transaction.amountKobo,
         session,
       });
+      receipt = {
+        userId: transaction.userId.toString(),
+        walletCreditKobo: transaction.amountKobo,
+        depositFeeKobo: feeKobo,
+        amountPaidKobo: providerAmount,
+        paystackFeeKobo: paystackFeeKobo ?? 0,
+      };
     });
   } finally {
     await session.endSession();
+  }
+
+  if (receipt) {
+    const details = [
+      { label: "Wallet credit", value: formatNaira(receipt.walletCreditKobo) },
+      { label: "Deposit fee", value: formatNaira(receipt.depositFeeKobo) },
+    ];
+    if (receipt.paystackFeeKobo > 0) {
+      details.push({ label: "Paystack processing fee", value: formatNaira(receipt.paystackFeeKobo) });
+    }
+    await sendPaymentReceiptEmail({
+      userId: receipt.userId,
+      subject: "Your wallet top-up is confirmed",
+      heading: "Wallet top-up confirmed",
+      amountPaidKobo: receipt.amountPaidKobo,
+      details,
+    });
   }
 };
 
@@ -418,6 +451,29 @@ export const internalTransfer = async (request: Request, response: Response): Pr
     }
 
     const transaction = await TransactionModel.findById(debitTransactionId);
+    const recipientName = `${recipientUser.firstName} ${recipientUser.lastName}`.trim();
+    await Promise.all([
+      sendPaymentReceiptEmail({
+        userId,
+        subject: "Your wallet transfer was sent",
+        heading: "Wallet transfer sent",
+        amountPaidKobo: amountKobo,
+        amountLabel: "Amount sent",
+        details: [
+          { label: "Recipient", value: recipientName },
+        ],
+      }),
+      sendPaymentReceiptEmail({
+        userId: recipientUser._id.toString(),
+        subject: "You received a wallet transfer",
+        heading: "Wallet transfer received",
+        amountPaidKobo: amountKobo,
+        amountLabel: "Amount received",
+        details: [
+          { label: "From", value: "A Community Connect member" },
+        ],
+      }),
+    ]);
     return sendSuccess(response, 201, "Transfer completed", { transaction });
   });
 };
@@ -556,9 +612,16 @@ export const finalizeWithdrawal = async (request: Request, response: Response): 
 
 export const completeWithdrawal = async (reference: string): Promise<void> => {
   const session = await mongoose.startSession();
+  let receipt: {
+    userId: string;
+    withdrawalAmountKobo: number;
+    payoutAmountKobo: number;
+    platformFeeKobo: number;
+  } | undefined;
 
   try {
     await session.withTransaction(async () => {
+      receipt = undefined;
       const transaction = await TransactionModel.findOne({
         reference,
         type: "withdrawal",
@@ -595,9 +658,30 @@ export const completeWithdrawal = async (reference: string): Promise<void> => {
         netAmountKobo: payoutAmountKobo,
         session,
       });
+      receipt = {
+        userId: transaction.userId.toString(),
+        withdrawalAmountKobo: transaction.amountKobo,
+        payoutAmountKobo,
+        platformFeeKobo: transaction.feeKobo || 0,
+      };
     });
   } finally {
     await session.endSession();
+  }
+
+  if (receipt) {
+    const details = [
+      { label: "Requested withdrawal", value: formatNaira(receipt.withdrawalAmountKobo) },
+      { label: "Platform fee", value: formatNaira(receipt.platformFeeKobo) },
+    ];
+    await sendPaymentReceiptEmail({
+      userId: receipt.userId,
+      subject: "Your wallet withdrawal is complete",
+      heading: "Wallet withdrawal complete",
+      amountPaidKobo: receipt.payoutAmountKobo,
+      amountLabel: "Amount received",
+      details,
+    });
   }
 };
 

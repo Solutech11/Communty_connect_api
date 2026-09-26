@@ -364,3 +364,37 @@ test("ticket API documentation exposes complete tier, order, and validation sche
   assert.ok(dataSchema);
   assert.equal((dataSchema.oneOf as unknown[]).length, 2, "Checkout and free-ticket response shapes must both be documented");
 });
+
+test("check-in preview documentation includes request, response, enum, and error contracts", () => {
+  const operation = getOperation("POST /events/{eventId}/check-ins/verify");
+  assert.deepEqual(operation.security, [{ bearerAuth: [] }]);
+
+  const requestBody = operation.requestBody as { content: Record<string, { schema: Record<string, unknown> }> };
+  const requestSchema = requestBody.content["application/json"]?.schema;
+  assert.ok(requestSchema);
+  assert.deepEqual(requestSchema.required, ["qrToken"]);
+  assert.equal(requestSchema.additionalProperties, false);
+  const qrSchema = (requestSchema.properties as Record<string, Record<string, unknown>>).qrToken;
+  assert.deepEqual([qrSchema?.minLength, qrSchema?.maxLength], [32, 4096]);
+
+  const successSchema = getSuccessSchema(operation);
+  assert.deepEqual(schemaAtPath(successSchema, "data.status")?.enum, ["valid"]);
+  assert.deepEqual(schemaAtPath(successSchema, "data.ticket.paymentStatus")?.enum, ["paid"]);
+  assert.deepEqual(schemaAtPath(successSchema, "data.checkedInAt")?.type, ["string", "null"]);
+  assert.deepEqual(schemaAtPath(successSchema, "data.attendee.avatarUrl")?.type, ["string", "null"]);
+
+  const responses = operation.responses as Record<string, { content: Record<string, {
+    examples: Record<string, { value: { data?: Record<string, unknown>; error?: { code: string } } }>;
+    schema: Record<string, unknown>;
+  }> }>;
+  const successExamples = responses["200"]?.content["application/json"]?.examples;
+  assert.equal(successExamples?.available?.value.data?.canCheckIn, true);
+  assert.equal(successExamples?.alreadyCheckedIn?.value.data?.canCheckIn, false);
+  assert.equal(typeof successExamples?.alreadyCheckedIn?.value.data?.checkedInAt, "string");
+  assert.equal(successExamples?.outsideWindow?.value.data?.checkedInAt, null);
+
+  const notFound = responses["404"]?.content["application/json"];
+  assert.deepEqual(schemaAtPath(notFound?.schema, "error.code")?.enum, ["INVALID_TICKET", "EVENT_NOT_FOUND"]);
+  assert.equal(notFound?.examples.invalidTicket?.value.error?.code, "INVALID_TICKET");
+  assert.equal(notFound?.examples.eventNotFound?.value.error?.code, "EVENT_NOT_FOUND");
+});

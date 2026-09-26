@@ -137,7 +137,8 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | PATCH | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Update unsold ticket type on a draft or declined event |
 | DELETE | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Deactivate unsold ticket type on a draft or declined event |
 | GET | `/events/{id}/attendees` | Yes | Owner attendee list with check-in flags, timestamps, and count summary |
-| POST | `/events/{id}/check-ins` | Yes | Owner QR validation and one-time check-in |
+| POST | `/events/{eventId}/check-ins/verify` | Yes | Read-only QR preview with attendee and ticket details, check-in eligibility, and prior check-in time |
+| POST | `/events/{id}/check-ins` | Yes | Owner QR validation and one-time check-in, available from two hours before the event through its end time |
 | POST | `/events/{id}/reports` | Yes | Report a published event for moderation |
 | GET | `/tickets` | Yes | List my ticket orders |
 | GET | `/tickets/{orderNumber}` | Yes | Get owned paid ticket and QR token |
@@ -296,8 +297,9 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 3. Leave raw-body capture enabled. The webhook compares `x-paystack-signature` with HMAC-SHA512 in constant time.
 4. Top-ups are credited only after signed `charge.success` or an authenticated server-to-server verification. The Paystack amount must equal the initialized wallet credit plus platform deposit charge, or the charged amount less Paystack's reported processing fee must equal it when Paystack's "Pass fees to customers" setting is enabled.
    The same settlement rule applies to paid ticket and premium community orders before their inventory or memberships are finalized.
-5. Withdrawals use stored Paystack recipient codes, unique references, reserved wallet funds, and final `transfer.success`, `transfer.failed`, or `transfer.reversed` webhooks.
-6. If Paystack transfer confirmation is enabled, call the finalize route with the user's OTP. Never log the OTP.
+5. Confirmed wallet top-ups, ticket purchases, premium memberships, successful withdrawals, and internal wallet transfers send transaction emails to the affected users. Mail delivery is best-effort and does not reverse a committed financial transaction.
+6. Withdrawals use stored Paystack recipient codes, unique references, reserved wallet funds, and final `transfer.success`, `transfer.failed`, or `transfer.reversed` webhooks.
+7. If Paystack transfer confirmation is enabled, call the finalize route with the user's OTP. Never log the OTP.
 
 ## Event Recommendation Algorithm
 

@@ -206,6 +206,52 @@ for (const endpoint of apiEndpoints) {
       })()
     : undefined;
 
+  const checkInPreviewNotFoundResponse = key === "POST /events/{eventId}/check-ins/verify"
+    ? {
+        description: "The event is unavailable to this organizer, or the QR token is not a paid ticket for this event.",
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["success", "error", "requestId"],
+              properties: {
+                success: { type: "boolean", const: false },
+                error: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["code", "message"],
+                  properties: {
+                    code: { type: "string", enum: ["INVALID_TICKET", "EVENT_NOT_FOUND"] },
+                    message: { type: "string" },
+                  },
+                },
+                requestId: { type: "string" },
+              },
+            },
+            examples: {
+              invalidTicket: {
+                summary: "Invalid, unpaid, or wrong-event QR token",
+                value: {
+                  success: false,
+                  error: { code: "INVALID_TICKET", message: "Ticket is invalid" },
+                  requestId: "req_01J2EXAMPLE9G7TZ8K4X3",
+                },
+              },
+              eventNotFound: {
+                summary: "Event unavailable to this organizer",
+                value: {
+                  success: false,
+                  error: { code: "EVENT_NOT_FOUND", message: "Event was not found" },
+                  requestId: "req_01J2EXAMPLE9G7TZ8K4X3",
+                },
+              },
+            },
+          },
+        },
+      }
+    : undefined;
+
   const operation: Record<string, unknown> = {
     tags: [endpoint.tag],
     summary: endpoint.summary,
@@ -270,7 +316,7 @@ for (const endpoint of apiEndpoints) {
       "400": { $ref: "#/components/responses/BadRequest" },
       "401": { $ref: "#/components/responses/Unauthorized" },
       "403": { $ref: "#/components/responses/Forbidden" },
-      "404": { $ref: "#/components/responses/NotFound" },
+      "404": checkInPreviewNotFoundResponse || { $ref: "#/components/responses/NotFound" },
       "409": { $ref: "#/components/responses/Conflict" },
       "415": { $ref: "#/components/responses/UnsupportedMediaType" },
       "422": { $ref: "#/components/responses/ValidationError" },

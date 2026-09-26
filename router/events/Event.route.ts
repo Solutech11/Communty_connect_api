@@ -15,6 +15,7 @@ import {
   removeTicketType,
   updateEvent,
   updateTicketType,
+  verifyCheckInTicket,
 } from "../../Controller/event.controller";
 import { createTargetReport } from "../../Controller/report.controller";
 import { createTicketOrder } from "../../Controller/ticket.controller";
@@ -166,10 +167,17 @@ router.post(
   asyncHandler(createTargetReport("event")),
 );
 router.get("/:id/attendees", authenticate, validate({ params: idParamsSchema }), asyncHandler(listAttendees));
+const checkInBody = z.object({ qrToken: z.string().min(32).max(4096) }).strict();
+router.post(
+  "/:eventId/check-ins/verify",
+  authenticate,
+  validate({ params: z.object({ eventId: objectIdSchema }), body: checkInBody }),
+  asyncHandler(verifyCheckInTicket),
+);
 router.post(
   "/:id/check-ins",
   authenticate,
-  validate({ params: idParamsSchema, body: z.object({ qrToken: z.string().min(32).max(4096) }).strict() }),
+  validate({ params: idParamsSchema, body: checkInBody }),
   asyncHandler(checkInTicket),
 );
 

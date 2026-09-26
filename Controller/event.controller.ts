@@ -597,10 +597,87 @@ export const listAttendees = async (request: Request, response: Response): Promi
     },
   });
 };
+
+const checkInOpensAt = (startsAt: Date): Date => new Date(startsAt.getTime() - 2 * 60 * 60 * 1000);
+
+interface CheckInPreviewOrder {
+  _id: unknown;
+  orderNumber: string;
+  quantity: number;
+  status: "paid";
+  checkedInAt?: Date;
+  buyerId: {
+    _id: unknown;
+    firstName: string;
+    lastName: string;
+    email: string;
+    avatarUrl?: string;
+  } | null;
+  ticketTypeId: { title: string } | null;
+}
+
+export const verifyCheckInTicket = async (request: Request, response: Response): Promise<Response> => {
+  const event = await requireOwnedEvent(request.params.eventId as string, request.auth?.id as string);
+  const order = await TicketOrderModel.findOne({
+    eventId: event._id,
+    qrTokenHash: sha256(request.body.qrToken),
+    status: "paid",
+  })
+    .select("_id orderNumber quantity status checkedInAt buyerId ticketTypeId")
+    .populate("buyerId", "firstName lastName email avatarUrl")
+    .populate("ticketTypeId", "title")
+    .lean<CheckInPreviewOrder>();
+
+  if (!order?.buyerId || !order.ticketTypeId) {
+    throw new AppError(404, "Ticket is invalid", "INVALID_TICKET");
+  }
+
+  const checkedInAt = order.checkedInAt ?? null;
+  const now = new Date();
+  const canCheckIn = checkedInAt === null && now >= checkInOpensAt(event.startsAt) && now <= event.endsAt;
+
+  return sendSuccess(response, 200, "Ticket verified", {
+    status: "valid",
+    canCheckIn,
+    checkedInAt,
+    event: {
+      id: String(event._id),
+      title: event.title,
+    },
+    attendee: {
+      id: String(order.buyerId._id),
+      name: `${order.buyerId.firstName} ${order.buyerId.lastName}`.trim(),
+      email: order.buyerId.email,
+      avatarUrl: order.buyerId.avatarUrl ?? null,
+    },
+    ticket: {
+      orderId: String(order._id),
+      orderNumber: order.orderNumber,
+      ticketType: order.ticketTypeId.title,
+      quantity: order.quantity,
+      paymentStatus: order.status,
+    },
+  });
+};
+
 export const checkInTicket = async (request: Request, response: Response): Promise<Response> => {
   const event = await requireOwnedEvent(request.params.id as string, request.auth?.id as string);
-  const qrTokenHash = sha256(request.body.qrToken);
   const checkedInAt = new Date();
+  const opensAt = checkInOpensAt(event.startsAt);
+
+  if (checkedInAt < opensAt) {
+    throw new AppError(409, "Ticket check-in opens two hours before the event starts", "CHECKIN_NOT_OPEN", {
+      checkInOpensAt: opensAt,
+    });
+  }
+
+  if (checkedInAt > event.endsAt) {
+    throw new AppError(409, "Ticket check-in is closed because the event has ended", "CHECKIN_CLOSED", {
+      endsAt: event.endsAt,
+    });
+  }
+
+  const qrTokenHash = sha256(request.body.qrToken);
   const order = await TicketOrderModel.findOneAndUpdate(
     {
       eventId: event._id,

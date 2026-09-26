@@ -24,6 +24,7 @@ import { matchesPaystackSettlement } from "../utils/paystackSettlement.utils";
 import { sendSuccess } from "../utils/response.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
 import { calculatePlatformCharge, recordPlatformEarning } from "../utils/platformCharge.utils";
+import { formatNaira, sendPaymentReceiptEmail } from "../utils/paymentEmail.utils";
 
 const orderNumber = (): string => `CC-${Date.now()}-${randomUUID().slice(0, 8).toUpperCase()}`;
 const paymentReference = (): string => `ticket_${randomUUID()}`.toLowerCase();
@@ -202,9 +203,23 @@ export const completeTicketOrder = async (
   const session = await mongoose.startSession();
   let paidOrderId: string | undefined;
   let buyerId: string | undefined;
+  let receipt: {
+    userId: string;
+    orderNumber: string;
+    eventTitle: string;
+    ticketTypeTitle: string;
+    quantity: number;
+    subtotalKobo: number;
+    platformFeeKobo: number;
+    amountPaidKobo: number;
+    paystackFeeKobo: number;
+  } | undefined;
 
   try {
     await session.withTransaction(async () => {
+      paidOrderId = undefined;
+      buyerId = undefined;
+      receipt = undefined;
       const order = await TicketOrderModel.findOne({
         paymentReference: reference,
         status: "pending",
@@ -278,6 +293,20 @@ export const completeTicketOrder = async (
       });
       paidOrderId = order._id.toString();
       buyerId = order.buyerId.toString();
+      if (providerAmount > 0 && order.totalKobo > 0) {
+        const ticketType = await TicketTypeModel.findById(order.ticketTypeId).session(session);
+        receipt = {
+          userId: order.buyerId.toString(),
+          orderNumber: order.orderNumber,
+          eventTitle: event.title,
+          ticketTypeTitle: ticketType?.title ?? "Event ticket",
+          quantity: order.quantity,
+          subtotalKobo: ticketSubtotalKobo,
+          platformFeeKobo,
+          amountPaidKobo: providerAmount,
+          paystackFeeKobo: paystackFeeKobo ?? 0,
+        };
+      }
     });
   } finally {
     await session.endSession();
@@ -291,6 +320,28 @@ export const completeTicketOrder = async (
       body: "Your event ticket is ready in My Tickets.",
       data: { orderId: paidOrderId, route: "MyTickets" },
       dedupeKey: `ticket-paid:${paidOrderId}`,
+    });
+  }
+
+  if (receipt) {
+    const details = [
+      { label: "Event", value: receipt.eventTitle },
+      { label: "Ticket", value: `${receipt.quantity} × ${receipt.ticketTypeTitle}` },
+      { label: "Ticket subtotal", value: formatNaira(receipt.subtotalKobo) },
+      { label: "Platform fee", value: formatNaira(receipt.platformFeeKobo) },
+    ];
+    if (receipt.paystackFeeKobo > 0) {
+      details.push({ label: "Paystack processing fee", value: formatNaira(receipt.paystackFeeKobo) });
+    }
+    await sendPaymentReceiptEmail({
+      userId: receipt.userId,
+      subject: "Your ticket payment is confirmed",
+      heading: "Ticket payment confirmed",
+      amountPaidKobo: receipt.amountPaidKobo,
+      details: [
+        { label: "Order", value: receipt.orderNumber },
+        ...details,
+      ],
     });
   }
 };

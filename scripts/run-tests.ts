@@ -3,6 +3,7 @@ import { once } from "node:events";
 
 const testFiles = [
   "tests/admin-views.test.ts",
+  "tests/check-in-window.test.ts",
   "tests/api-gap-contracts.test.ts",
   "tests/charges.test.ts",
   "tests/crypto.test.ts",

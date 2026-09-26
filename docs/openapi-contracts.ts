@@ -160,6 +160,45 @@ const attendeeOrderResponseSchema: OpenApiSchema = {
     checkedInAt: { type: ["string", "null"], format: "date-time" },
   },
 };
+const checkInPreviewDataSchema: OpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "canCheckIn", "checkedInAt", "event", "attendee", "ticket"],
+  properties: {
+    status: { type: "string", enum: ["valid"] },
+    canCheckIn: { type: "boolean" },
+    checkedInAt: { type: ["string", "null"], format: "date-time" },
+    event: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "title"],
+      properties: { id: objectIdResponseSchema, title: { type: "string" } },
+    },
+    attendee: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "name", "email", "avatarUrl"],
+      properties: {
+        id: objectIdResponseSchema,
+        name: { type: "string" },
+        email: { type: "string", format: "email" },
+        avatarUrl: { type: ["string", "null"], format: "uri" },
+      },
+    },
+    ticket: {
+      type: "object",
+      additionalProperties: false,
+      required: ["orderId", "orderNumber", "ticketType", "quantity", "paymentStatus"],
+      properties: {
+        orderId: objectIdResponseSchema,
+        orderNumber: ticketOrderBaseProperties.orderNumber,
+        ticketType: { type: "string" },
+        quantity: { type: "integer", minimum: 1, maximum: 20 },
+        paymentStatus: { type: "string", enum: ["paid"] },
+      },
+    },
+  },
+};
 
 export const ticketResponseSchemaContracts: Record<string, Record<string, OpenApiSchema>> = {
   "GET /events/{id}": { "data.ticketTypes[]": ticketTypeResponseSchema },
@@ -167,6 +206,7 @@ export const ticketResponseSchemaContracts: Record<string, Record<string, OpenAp
   "PATCH /events/{id}/ticket-types/{ticketTypeId}": { "data.ticketType": ticketTypeResponseSchema },
   "POST /events/{id}/orders": { "data.order": ticketOrderResponseSchema },
   "GET /events/{id}/attendees": { "data.attendees[]": attendeeOrderResponseSchema },
+  "POST /events/{eventId}/check-ins/verify": { data: checkInPreviewDataSchema },
   "POST /events/{id}/check-ins": { "data.order": ticketOrderResponseSchema },
   "GET /tickets": { "data.tickets[]": myTicketOrderResponseSchema },
   "GET /tickets/{orderNumber}": { "data.order": myTicketOrderResponseSchema },
@@ -536,6 +576,14 @@ const attendeeOrder = {
   checkedIn: true,
   checkedInAt: createdAt,
 };
+const checkInPreview = {
+  status: "valid",
+  canCheckIn: true,
+  checkedInAt: null,
+  event: { id, title: event.title },
+  attendee: { id: user._id, name: `${user.firstName} ${user.lastName}`, email: user.email, avatarUrl: user.avatarUrl },
+  ticket: { orderId: orderBase._id, orderNumber: orderBase.orderNumber, ticketType: ticketType.title, quantity: orderBase.quantity, paymentStatus: "paid" },
+};
 
 const community = {
   _id: id,
@@ -875,6 +923,7 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "POST /events/{id}/orders": jsonBody({ ticketTypeId: secondId, quantity: 1 }, ["ticketTypeId", "quantity"]),
   "POST /events/{id}/ticket-types": jsonBody({ title: "General Admission", description: "Standard event access", priceKobo: 500000, capacity: 200 }, ["title", "priceKobo"]),
   "PATCH /events/{id}/ticket-types/{ticketTypeId}": jsonBody({ title: "Early Bird", description: "Discounted early access", priceKobo: 400000, capacity: 100 }, [], "Send at least one ticket-type field."),
+  "POST /events/{eventId}/check-ins/verify": jsonBody({ qrToken: "opaque-ticket-token-at-least-thirty-two-characters" }, ["qrToken"]),
   "POST /events/{id}/check-ins": jsonBody({ qrToken: "opaque-ticket-token-at-least-thirty-two-characters" }, ["qrToken"]),
 
   "POST /communities": jsonBody({ name: "Lagos Product Builders", description: "A community for product designers, engineers, and founders in Lagos.", imageUrl: "https://res.cloudinary.com/example/community.webp", category: "Technology", state: "Lagos", lga: "Ikeja", visibility: "public", membershipType: "premium", membershipPriceKobo: 200000 }, ["name", "description", "category"]),
@@ -995,14 +1044,16 @@ if (updateTicketTypeContract) {
   updateTicketTypeContract.description = "Updates at least one ticket tier field. priceKobo is a non-negative integer in kobo.";
   updateTicketTypeContract.schema = { ...ticketTypeRequestSchema, minProperties: 1 };
 }
-const checkInContract = requestBodyContracts["POST /events/{id}/check-ins"];
-if (checkInContract) {
-  checkInContract.schema = {
-    type: "object",
-    additionalProperties: false,
-    required: ["qrToken"],
-    properties: { qrToken: { type: "string", minLength: 32, maxLength: 4096 } },
-  };
+for (const key of ["POST /events/{eventId}/check-ins/verify", "POST /events/{id}/check-ins"]) {
+  const checkInContract = requestBodyContracts[key];
+  if (checkInContract) {
+    checkInContract.schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["qrToken"],
+      properties: { qrToken: { type: "string", minLength: 32, maxLength: 4096 } },
+    };
+  }
 }
 
 const strictObject = (
@@ -1272,6 +1323,9 @@ export const requestBodySchemaContracts: Record<string, OpenApiSchema> = {
     ...strictObject(ticketTypeRequestProperties),
     minProperties: 1,
   },
+  "POST /events/{eventId}/check-ins/verify": strictObject({
+    qrToken: { type: "string", minLength: 32, maxLength: 4096 },
+  }, ["qrToken"]),
   "POST /events/{id}/check-ins": strictObject({
     qrToken: { type: "string", minLength: 32, maxLength: 4096 },
   }, ["qrToken"]),
@@ -1574,6 +1628,31 @@ export const successContracts: Record<string, SuccessContract> = {
   "PATCH /events/{id}/ticket-types/{ticketTypeId}": ok("Ticket type updated", { ticketType: { ...ticketType, title: "Early Bird" } }),
   "DELETE /events/{id}/ticket-types/{ticketTypeId}": ok("Ticket type removed"),
   "GET /events/{id}/attendees": ok("Attendees retrieved", { attendees: [attendeeOrder], summary: { orders: 1, totalTickets: 1, checkedInTickets: 1, pendingTickets: 0 } }),
+  "POST /events/{eventId}/check-ins/verify": {
+    ...ok("Ticket verified", checkInPreview),
+    examples: {
+      available: {
+        summary: "Paid ticket available for check-in",
+        value: { success: true, message: "Ticket verified", data: checkInPreview },
+      },
+      alreadyCheckedIn: {
+        summary: "Paid ticket already checked in",
+        value: {
+          success: true,
+          message: "Ticket verified",
+          data: { ...checkInPreview, canCheckIn: false, checkedInAt: createdAt },
+        },
+      },
+      outsideWindow: {
+        summary: "Paid ticket outside the check-in window",
+        value: {
+          success: true,
+          message: "Ticket verified",
+          data: { ...checkInPreview, canCheckIn: false, checkedInAt: null },
+        },
+      },
+    },
+  },
   "POST /events/{id}/check-ins": ok("Ticket checked in", { order: { ...orderBase, checkedInAt: createdAt } }),
   "POST /events/{id}/reports": ok("Report submitted", { report }, 201),
 
@@ -1648,6 +1727,7 @@ export const successContracts: Record<string, SuccessContract> = {
 
 export const pathParameterExamples: Record<string, { description: string; example: string; schema?: OpenApiSchema }> = {
   id: { description: "MongoDB resource identifier.", example: id, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+  eventId: { description: "MongoDB event identifier.", example: id, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
   userId: { description: "MongoDB user identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
   requestId: { description: "MongoDB community join-request identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
   callId: { description: "MongoDB community-call identifier.", example: secondId, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },

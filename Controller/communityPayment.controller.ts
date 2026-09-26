@@ -16,6 +16,7 @@ import {
 import { matchesPaystackSettlement } from "../utils/paystackSettlement.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
 import { sendSuccess } from "../utils/response.utils";
+import { formatNaira, sendPaymentReceiptEmail } from "../utils/paymentEmail.utils";
 
 const membershipReference = (): string => `community_${randomUUID()}`.toLowerCase();
 const membershipOrderNumber = (): string => {
@@ -156,9 +157,19 @@ export const completeCommunityMembershipOrder = async (
   paystackFeeKobo?: number | null,
 ): Promise<void> => {
   const session = await mongoose.startSession();
+  let receipt: {
+    userId: string;
+    orderNumber: string;
+    communityName: string;
+    ownerProceedsKobo: number;
+    platformFeeKobo: number;
+    amountPaidKobo: number;
+    paystackFeeKobo: number;
+  } | undefined;
 
   try {
     await session.withTransaction(async () => {
+      receipt = undefined;
       const order = await CommunityMembershipOrderModel.findOne({
         paymentReference: reference,
         status: "pending",
@@ -184,6 +195,11 @@ export const completeCommunityMembershipOrder = async (
 
       if (!transaction) {
         throw new AppError(409, "Membership transaction is unavailable", "TRANSACTION_UNAVAILABLE");
+      }
+
+      const community = await CommunityModel.findById(order.communityId).session(session);
+      if (!community || community.membershipType !== "premium") {
+        throw new AppError(409, "Premium community is unavailable", "COMMUNITY_UNAVAILABLE");
       }
 
       const ownerWallet = await WalletModel.findOneAndUpdate(
@@ -227,9 +243,37 @@ export const completeCommunityMembershipOrder = async (
         },
         session,
       });
+      receipt = {
+        userId: order.buyerId.toString(),
+        orderNumber: order.orderNumber,
+        communityName: community.name,
+        ownerProceedsKobo: order.ownerProceedsKobo,
+        platformFeeKobo: order.platformFeeKobo,
+        amountPaidKobo: providerAmount,
+        paystackFeeKobo: paystackFeeKobo ?? 0,
+      };
     });
   } finally {
     await session.endSession();
+  }
+
+  if (receipt) {
+    const details = [
+      { label: "Order", value: receipt.orderNumber },
+      { label: "Community", value: receipt.communityName },
+      { label: "Owner proceeds", value: formatNaira(receipt.ownerProceedsKobo) },
+      { label: "Platform fee", value: formatNaira(receipt.platformFeeKobo) },
+    ];
+    if (receipt.paystackFeeKobo > 0) {
+      details.push({ label: "Paystack processing fee", value: formatNaira(receipt.paystackFeeKobo) });
+    }
+    await sendPaymentReceiptEmail({
+      userId: receipt.userId,
+      subject: "Your community membership payment is confirmed",
+      heading: "Membership payment confirmed",
+      amountPaidKobo: receipt.amountPaidKobo,
+      details,
+    });
   }
 };
 
