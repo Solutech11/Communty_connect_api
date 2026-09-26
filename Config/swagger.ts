@@ -19,6 +19,40 @@ const operationKey = (method: string, path: string): string => {
   return `${method.toUpperCase()} ${path}`;
 };
 
+const checkoutErrorResponse = (
+  description: string,
+  examples: Record<string, { summary: string; code: string; message: string }>,
+) => ({
+  description,
+  content: {
+    "application/json": {
+      schema: {
+        type: "object", additionalProperties: false,
+        required: ["success", "error", "requestId"],
+        properties: {
+          success: { type: "boolean", const: false },
+          error: {
+            type: "object", additionalProperties: false,
+            required: ["code", "message"],
+            properties: {
+              code: { type: "string", enum: Object.values(examples).map((item) => item.code) },
+              message: { type: "string" },
+            },
+          },
+          requestId: { type: "string" },
+        },
+      },
+      examples: Object.fromEntries(Object.entries(examples).map(([name, item]) => [name, {
+        summary: item.summary,
+        value: {
+          success: false, error: { code: item.code, message: item.message },
+          requestId: "req_01J2EXAMPLE9G7TZ8K4X3",
+        },
+      }])),
+    },
+  },
+});
+
 const applyTicketResponseSchemaContracts = (
   schema: Record<string, unknown>,
   contracts: Record<string, Record<string, unknown>> | undefined,
@@ -158,6 +192,44 @@ for (const endpoint of apiEndpoints) {
         properties: {
           order: rawOrderSchema,
           qrToken: { type: "string", minLength: 32, maxLength: 4096 },
+        },
+      },
+    ];
+    delete dataSchema.properties;
+    delete dataSchema.required;
+  }
+
+  if (key === "POST /tickets/{orderNumber}/checkout") {
+    const dataSchema = (successSchema.properties as Record<string, Record<string, unknown>>).data!;
+    const orderSchema = ticketResponseSchemaContracts[key]?.["data.order"];
+    dataSchema.oneOf = [
+      {
+        type: "object", additionalProperties: false,
+        required: ["outcome", "order", "checkoutUrl"],
+        properties: {
+          outcome: { type: "string", const: "checkout_ready" },
+          order: {
+            ...orderSchema,
+            properties: {
+              ...(orderSchema?.properties as Record<string, unknown>),
+              status: { type: "string", const: "pending" },
+            },
+          },
+          checkoutUrl: { type: "string", format: "uri", pattern: "^https://checkout\\.paystack\\.com/" },
+        },
+      },
+      {
+        type: "object", additionalProperties: false,
+        required: ["outcome", "order"],
+        properties: {
+          outcome: { type: "string", const: "already_paid" },
+          order: {
+            ...orderSchema,
+            properties: {
+              ...(orderSchema?.properties as Record<string, unknown>),
+              status: { type: "string", const: "paid" },
+            },
+          },
         },
       },
     ];
@@ -313,15 +385,33 @@ for (const endpoint of apiEndpoints) {
           },
         },
       } : {}),
-      "400": { $ref: "#/components/responses/BadRequest" },
+      "400": key === "POST /tickets/{orderNumber}/checkout"
+        ? checkoutErrorResponse("Idempotency-Key is missing or invalid", {
+            invalidKey: { summary: "Required action key is missing or malformed", code: "IDEMPOTENCY_KEY_REQUIRED", message: "A valid Idempotency-Key header is required" },
+          })
+        : { $ref: "#/components/responses/BadRequest" },
       "401": { $ref: "#/components/responses/Unauthorized" },
       "403": { $ref: "#/components/responses/Forbidden" },
-      "404": checkInPreviewNotFoundResponse || { $ref: "#/components/responses/NotFound" },
-      "409": { $ref: "#/components/responses/Conflict" },
+      "404": key === "POST /tickets/{orderNumber}/checkout"
+        ? checkoutErrorResponse("Order not found or not owned by the buyer", {
+            notFound: { summary: "Missing or unowned order", code: "TICKET_ORDER_NOT_FOUND", message: "Ticket order was not found" },
+          })
+        : checkInPreviewNotFoundResponse || { $ref: "#/components/responses/NotFound" },
+      "409": key === "POST /tickets/{orderNumber}/checkout"
+        ? checkoutErrorResponse("Checkout cannot safely continue", {
+            processing: { summary: "Paystack status is processing or uncertain", code: "PAYMENT_STILL_PROCESSING", message: "Ticket payment is still being confirmed" },
+            notRetryable: { summary: "Order or reservation cannot be retried", code: "TICKET_ORDER_NOT_RETRYABLE", message: "Ticket order cannot be retried" },
+          })
+        : { $ref: "#/components/responses/Conflict" },
       "415": { $ref: "#/components/responses/UnsupportedMediaType" },
       "422": { $ref: "#/components/responses/ValidationError" },
       "429": { $ref: "#/components/responses/RateLimited" },
       "500": { $ref: "#/components/responses/ServerError" },
+      ...(key === "POST /tickets/{orderNumber}/checkout" ? {
+        "503": checkoutErrorResponse("Per-order financial lock is unavailable", {
+          lockUnavailable: { summary: "Redis financial lock unavailable", code: "FINANCIAL_LOCK_UNAVAILABLE", message: "This operation is temporarily unavailable" },
+        }),
+      } : {}),
       ...(key === "GET /locations/search" ? {
         "502": { $ref: "#/components/responses/BadGateway" },
         "503": { $ref: "#/components/responses/ServiceUnavailable" },

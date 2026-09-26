@@ -15,12 +15,14 @@ import {
 } from "./wallet.controller";
 import { completeTicketOrder } from "./ticket.controller";
 import { completeCommunityMembershipOrder } from "./communityPayment.controller";
+import { recordTicketRefundWebhook } from "../utils/ticketPayment.utils";
 
 const paystackWebhookSchema = z.object({
   event: z.string().min(1).max(100),
   data: z.object({
     id: z.union([z.number(), z.string()]).optional(),
     reference: z.string().min(1).max(100).optional(),
+    transaction_reference: z.string().min(1).max(100).optional(),
     amount: z.number().int().nonnegative().optional(),
     fees: z.number().int().nonnegative().nullable().optional(),
     status: z.string().max(60).optional(),
@@ -137,6 +139,11 @@ export const paystackWebhook = async (request: Request, response: Response): Pro
           await creditVerifiedTopup(reference, settlement.amountKobo, settlement.feeKobo);
         }
       }
+    } else if (payload.event.startsWith("refund.") && payload.data.transaction_reference?.startsWith("ticket_")) {
+      await recordTicketRefundWebhook(
+        payload.data.transaction_reference,
+        payload.data.status || payload.event.slice("refund.".length),
+      );
     } else if (payload.event === "transfer.success" && reference) {
       await completeWithdrawal(reference);
     } else if (

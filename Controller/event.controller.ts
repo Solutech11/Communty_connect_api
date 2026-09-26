@@ -18,6 +18,7 @@ import { sha256 } from "../utils/crypto.utils";
 import { eventModerationEmailTemplate, sendEmail } from "../utils/mailer.utils";
 import { logger } from "../utils/logger.utils";
 import { createNotification } from "../utils/notificationService.utils";
+import { sendTicketCheckInEmail } from "../utils/ticketEmail.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const createSlug = (title: string): string => {
@@ -696,6 +697,29 @@ export const checkInTicket = async (request: Request, response: Response): Promi
 
   if (order) {
     order.set("qrTokenHash", undefined);
+    const attendeeId = order.buyerId?.toString();
+    if (attendeeId) {
+      void createNotification({
+        userId: attendeeId,
+        type: "ticket_checked_in",
+        title: "You're checked in",
+        body: `Your ticket for ${event.title} has been checked in. Enjoy the event!`,
+        data: {
+          orderId: order._id.toString(),
+          orderNumber: order.orderNumber,
+          eventId: event._id.toString(),
+          checkedInAt: checkedInAt.toISOString(),
+          route: "MyTickets",
+        },
+        dedupeKey: `ticket-checked-in:${order._id.toString()}`,
+      });
+      void sendTicketCheckInEmail({
+        userId: attendeeId,
+        eventTitle: event.title,
+        orderNumber: order.orderNumber,
+        checkedInAt,
+      });
+    }
     return sendSuccess(response, 200, "Ticket checked in", { order });
   }
 

@@ -10,15 +10,29 @@ interface PaystackEnvelope<T> {
 }
 
 export interface PaystackTransactionData {
-  authorization_url: string;
-  access_code: string;
+  id?: number | string;
+  authorization_url?: string;
+  access_code?: string;
   reference: string;
   amount?: number;
+  requested_amount?: number;
   fees?: number | null;
   currency?: string;
   status?: string;
   metadata?: Record<string, unknown>;
   customer?: { email?: string };
+}
+
+interface PaystackInitializedTransaction extends PaystackTransactionData {
+  authorization_url: string;
+  access_code: string;
+}
+
+export interface PaystackRefundData {
+  id: number | string;
+  status: string;
+  amount?: number;
+  transaction?: number | string | { id?: number | string; reference?: string; amount?: number };
 }
 
 interface PaystackRecipientData {
@@ -95,7 +109,7 @@ export const initializePaystackTransaction = async (input: {
   amountKobo: number;
   reference: string;
   metadata: Record<string, unknown>;
-}): Promise<PaystackTransactionData> => {
+}): Promise<PaystackInitializedTransaction> => {
   return runPaystackRequest("initialize_transaction", () =>
     paystack.post("/transaction/initialize", {
       email: input.email,
@@ -117,6 +131,25 @@ export const verifyPaystackTransaction = async (
     paystack.get(`/transaction/verify/${encodeURIComponent(reference)}`),
   );
 };
+
+export const createPaystackRefund = async (reference: string): Promise<PaystackRefundData> =>
+  runPaystackRequest("create_refund", () =>
+    paystack.post("/refund", {
+      transaction: reference,
+      currency: env.PAYSTACK_CURRENCY,
+      merchant_note: "Duplicate or expired Community Connect ticket payment",
+    }),
+  );
+
+export const listPaystackRefunds = async (transactionId: string): Promise<PaystackRefundData[]> =>
+  runPaystackRequest("list_refunds", () =>
+    paystack.get("/refund", { params: { transaction: transactionId, perPage: 20 } }),
+  );
+
+export const fetchPaystackRefund = async (refundId: string): Promise<PaystackRefundData> =>
+  runPaystackRequest("fetch_refund", () =>
+    paystack.get(`/refund/${encodeURIComponent(refundId)}`),
+  );
 
 export const listPaystackBanks = async (): Promise<PaystackBank[]> => {
   return runPaystackRequest("list_banks", () =>

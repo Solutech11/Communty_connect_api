@@ -138,13 +138,16 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | DELETE | `/events/{id}/ticket-types/{ticketTypeId}` | Yes | Deactivate unsold ticket type on a draft or declined event |
 | GET | `/events/{id}/attendees` | Yes | Owner attendee list with check-in flags, timestamps, and count summary |
 | POST | `/events/{eventId}/check-ins/verify` | Yes | Read-only QR preview with attendee and ticket details, check-in eligibility, and prior check-in time |
-| POST | `/events/{id}/check-ins` | Yes | Owner QR validation and one-time check-in, available from two hours before the event through its end time |
+| POST | `/events/{id}/check-ins` | Yes | Owner QR validation and one-time check-in, available from two hours before the event through its end time; notifies the attendee by email and in-app notification |
 | POST | `/events/{id}/reports` | Yes | Report a published event for moderation |
 | GET | `/tickets` | Yes | List my ticket orders |
 | GET | `/tickets/{orderNumber}` | Yes | Get owned paid ticket and QR token |
+| POST | `/tickets/{orderNumber}/checkout` | Yes + key | Resume payment on an existing pending order; returns `checkout_ready` with a verified Paystack URL or `already_paid`; no request body |
 | GET | `/tickets/{orderNumber}/verify` | Yes | Verify Paystack settlement amount and issue ticket |
 
 `GET /events/{id}` returns active ticket tiers at `data.ticketTypes`. Each tier exposes its MongoDB `_id`, title, optional description and capacity, `priceKobo`, sold count, active flag, and timestamps. Ticket purchase prices use integer kobo in the API; the mobile UI converts them to naira for display. `/tickets` returns `data.tickets` with full order fields plus populated event and ticket-type summaries.
+
+`POST /tickets/{orderNumber}/checkout` takes no body. Send a fresh `Idempotency-Key` for a new checkout action, and reuse that key when retrying the same action. It checks every recorded Paystack reference before returning `checkout_ready` with `checkoutUrl` or `already_paid` without a URL. Uncertain payments return `PAYMENT_STILL_PROCESSING`; expired, cancelled, refunded, unreserved, or eight-attempt orders return `TICKET_ORDER_NOT_RETRYABLE`.
 
 ### Communities and Friends
 

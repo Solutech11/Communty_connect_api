@@ -123,6 +123,7 @@ const ticketOrderBaseProperties: Record<string, OpenApiSchema> = {
   organizerProceedsKobo: { type: "integer", minimum: 0 },
   status: { type: "string", enum: [...ticketOrderStatuses] },
   paymentReference: { type: "string" },
+  paidReference: { type: "string" },
   idempotencyKey: { type: "string", minLength: 16, maxLength: 128 },
   reservationExpiresAt: dateTimeResponseSchema,
   checkedInAt: dateTimeResponseSchema,
@@ -210,6 +211,15 @@ export const ticketResponseSchemaContracts: Record<string, Record<string, OpenAp
   "POST /events/{id}/check-ins": { "data.order": ticketOrderResponseSchema },
   "GET /tickets": { "data.tickets[]": myTicketOrderResponseSchema },
   "GET /tickets/{orderNumber}": { "data.order": myTicketOrderResponseSchema },
+  "POST /tickets/{orderNumber}/checkout": { "data.order": {
+    type: "object", additionalProperties: false,
+    required: ["orderNumber", "status", "totalKobo"],
+    properties: {
+      orderNumber: ticketOrderBaseProperties.orderNumber,
+      status: { type: "string", enum: ["pending", "paid"] },
+      totalKobo: { type: "integer", minimum: 0 },
+    },
+  } },
   "GET /tickets/{orderNumber}/verify": { "data.order": myTicketOrderResponseSchema },
 };
 const userStatuses = ["pending_verification", "active", "suspended", "deleted"] as const;
@@ -1695,6 +1705,26 @@ export const successContracts: Record<string, SuccessContract> = {
 
   "GET /tickets": ok("Tickets retrieved", { tickets: [order] }),
   "GET /tickets/{orderNumber}": ok("Ticket retrieved", { order, qrToken: "opaque-ticket-token-at-least-thirty-two-characters" }),
+  "POST /tickets/{orderNumber}/checkout": {
+    ...ok("Checkout is ready", {
+      outcome: "checkout_ready",
+      order: { orderNumber: orderBase.orderNumber, status: "pending", totalKobo: 525000 },
+      checkoutUrl: "https://checkout.paystack.com/example",
+    }),
+    examples: {
+      checkoutReady: { summary: "Verified checkout can be resumed", value: {
+        success: true, message: "Checkout is ready", data: {
+          outcome: "checkout_ready", order: { orderNumber: orderBase.orderNumber, status: "pending", totalKobo: 525000 },
+          checkoutUrl: "https://checkout.paystack.com/example",
+        },
+      } },
+      alreadyPaid: { summary: "Payment already confirmed", value: {
+        success: true, message: "Ticket payment is already confirmed", data: {
+          outcome: "already_paid", order: { orderNumber: orderBase.orderNumber, status: "paid", totalKobo: 525000 },
+        },
+      } },
+    },
+  },
   "GET /tickets/{orderNumber}/verify": ok("Ticket retrieved", { order, qrToken: "opaque-ticket-token-at-least-thirty-two-characters" }),
 
   "GET /notifications": ok("Notifications retrieved", { notifications: [notification], unread: 1, pagination: { page: 1, limit: 20, total: 1 } }),

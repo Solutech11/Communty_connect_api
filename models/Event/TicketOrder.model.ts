@@ -18,6 +18,7 @@ const ticketOrderSchema = new Schema(
       index: true,
     },
     paymentReference: { type: String, sparse: true, unique: true },
+    paidReference: { type: String },
     idempotencyKey: { type: String, required: true },
     qrTokenHash: { type: String, select: false },
     encryptedQrToken: { type: String, select: false },
