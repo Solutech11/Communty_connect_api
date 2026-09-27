@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { listDiscoverEvents } from "../../Controller/eventDiscovery.controller";
 import {
   addTicketType,
   cancelEvent,
@@ -104,6 +105,18 @@ router.get(
   asyncHandler(listEvents),
 );
 router.get(
+  "/discover",
+  validate({
+    query: z.object({
+      section: z.enum(["trending", "recent", "past"]),
+      state: z.string().trim().min(2).max(80).optional(),
+      page: z.coerce.number().int().min(1).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+    }).strict(),
+  }),
+  asyncHandler(listDiscoverEvents),
+);
+router.get(
   "/recommended",
   authenticate,
   validate({
@@ -135,6 +148,7 @@ router.post(
     body: z.object({
       ticketTypeId: objectIdSchema,
       quantity: z.number().int().min(1).max(20),
+      client: z.enum(["mobile", "web"]).optional(),
     }).strict(),
   }),
   asyncHandler(createTicketOrder),

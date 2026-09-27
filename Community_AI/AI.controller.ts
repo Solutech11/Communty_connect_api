@@ -1,5 +1,6 @@
 ﻿import type { Request, Response } from "express";
 import { AISessionModel } from "../models/AI/AISession.model";
+import { EventModel } from "../models/Event/Event.model";
 import { ConversationModel } from "../models/Chat/Conversation.model";
 import { MessageModel } from "../models/Chat/Message.model";
 import { AppError } from "../utils/AppError";
@@ -10,7 +11,7 @@ import { createAIResponse, type AIMessage, type AIPurpose } from "./Groq";
 
 const runAI = async (
   userId: string,
-  purpose: AIPurpose,
+  purpose: Exclude<AIPurpose, "guest">,
   prompt: string,
   sessionId?: string,
 ) => {
@@ -83,6 +84,27 @@ export const assistantChat = async (request: Request, response: Response): Promi
     request.body.sessionId,
   );
   return sendSuccess(response, 200, "AI response generated", result);
+};
+
+export const guestAssistantChat = async (request: Request, response: Response): Promise<Response> => {
+  const state = request.body.state as string | undefined;
+  const events = await EventModel.find({
+    status: "published",
+    startsAt: { $gte: new Date() },
+    ...(state ? { state } : {}),
+  }).sort({ startsAt: 1 }).limit(5).select("title startsAt state venueName").lean();
+  const publicFacts = events.map((event) => ({
+    title: event.title,
+    startsAt: event.startsAt.toISOString(),
+    state: event.state,
+    venueName: event.venueName,
+  }));
+  const result = await createAIResponse({
+    purpose: "guest",
+    prompt: `Public upcoming events: ${JSON.stringify(publicFacts)}\nVisitor question: ${request.body.message}`,
+    history: request.body.history,
+  });
+  return sendSuccess(response, 200, "AI response generated", { message: result.text });
 };
 
 export const generateEventCopy = async (request: Request, response: Response): Promise<Response> => {

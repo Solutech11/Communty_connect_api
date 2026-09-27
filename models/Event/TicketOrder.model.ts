@@ -19,6 +19,8 @@ const ticketOrderSchema = new Schema(
     },
     paymentReference: { type: String, sparse: true, unique: true },
     paidReference: { type: String },
+    paidAt: { type: Date },
+    checkoutClient: { type: String, enum: ["mobile", "web"], default: "mobile" },
     idempotencyKey: { type: String, required: true },
     qrTokenHash: { type: String, select: false },
     encryptedQrToken: { type: String, select: false },
@@ -34,6 +36,7 @@ ticketOrderSchema.index({ eventId: 1, buyerId: 1 });
 ticketOrderSchema.index({ eventId: 1, qrTokenHash: 1 });
 ticketOrderSchema.index({ buyerId: 1, idempotencyKey: 1 }, { unique: true });
 ticketOrderSchema.index({ buyerId: 1, status: 1, createdAt: -1 });
+ticketOrderSchema.index({ eventId: 1, status: 1, paidAt: -1 });
 
 export type TicketOrder = InferSchemaType<typeof ticketOrderSchema>;
 export const TicketOrderModel =

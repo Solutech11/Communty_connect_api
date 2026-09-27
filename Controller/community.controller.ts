@@ -1,9 +1,12 @@
 ﻿import { randomBytes } from "node:crypto";
 import bcrypt from "bcrypt";
 import type { Request, Response } from "express";
+import mongoose from "mongoose";
 import { CommunityModel } from "../models/Community/Community.model";
 import { CommunityMemberModel } from "../models/Community/CommunityMember.model";
+import { CommunityMembershipOrderModel } from "../models/Community/CommunityMembershipOrder.model";
 import { AppError } from "../utils/AppError";
+import { communityCodeLookupHash } from "../utils/communityCode.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const communitySlug = (name: string): string => {
@@ -57,8 +60,10 @@ export const getCommunity = async (request: Request, response: Response): Promis
       (community.ownerId.toString() === userId ||
         community.members.some((memberId) => memberId.toString() === userId)),
   );
-
-  if (community.visibility === "private" && !canViewPrivate) {
+  const paid = community.membershipType !== "premium" || community.ownerId.toString() === userId || Boolean(userId && await CommunityMembershipOrderModel.exists({
+    communityId: community._id, buyerId: userId, status: "paid",
+  }));
+  if (community.visibility === "private" && (!canViewPrivate || !paid)) {
     throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
   }
 
@@ -71,31 +76,83 @@ export const getCommunity = async (request: Request, response: Response): Promis
 };
 
 export const createCommunity = async (request: Request, response: Response): Promise<Response> => {
-    const userId = request.auth?.id;
+  const userId = request.auth?.id;
   if (!userId) throw new AppError(401, "Authentication is required", "UNAUTHENTICATED");
-const { accessCode, ...communityInput } = request.body as { accessCode?: string };
-  const community = await CommunityModel.create({
-    ...communityInput,
-    ...(accessCode ? { accessCodeHash: await bcrypt.hash(accessCode, 12) } : {}),
-    ownerId: userId,
-    members: [userId],
-    slug: communitySlug(request.body.name),
-  });
-  await CommunityMemberModel.create({
-    communityId: community._id,
-    userId,
-    role: "owner",
-    status: "active",
-  });
+  const { accessCode, ...communityInput } = request.body as { accessCode?: string };
+  const session = await mongoose.startSession();
+  let community;
+  try {
+    await session.withTransaction(async () => {
+      const [createdCommunity] = await CommunityModel.create([{
+        ...communityInput,
+        ...(accessCode ? {
+          accessCodeHash: await bcrypt.hash(accessCode, 12),
+          accessCodeLookupHash: communityCodeLookupHash(accessCode),
+        } : {}),
+        ownerId: userId,
+        members: [userId],
+        slug: communitySlug(request.body.name),
+      }], { session });
+      if (!createdCommunity) throw new AppError(500, "Community could not be created", "COMMUNITY_CREATE_FAILED");
+      community = createdCommunity;
+      await CommunityMemberModel.create([{
+        communityId: createdCommunity._id,
+        userId,
+        role: "owner",
+        status: "active",
+      }], { session });
+    });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === 11000) {
+      throw new AppError(409, "Community code or name is already in use", "COMMUNITY_CONFLICT");
+    }
+    throw error;
+  } finally {
+    await session.endSession();
+  }
   return sendSuccess(response, 201, "Community created", { community });
 };
 
+export const resolveCommunityCode = async (request: Request, response: Response): Promise<Response> => {
+  const codeHash = communityCodeLookupHash(request.body.accessCode as string);
+  const community = await CommunityModel.findOne({
+    visibility: "private",
+    joinPolicy: { $in: ["access_code", "approval", "open"] },
+    accessCodeLookupHash: codeHash,
+  }).select("+accessCodeHash");
+  if (!community?.accessCodeHash || !await bcrypt.compare(request.body.accessCode, community.accessCodeHash)) {
+    throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
+  }
+  return sendSuccess(response, 200, "Community found", {
+    community: {
+      id: community._id.toString(),
+      name: community.name,
+      imageUrl: community.imageUrl || "",
+      visibility: community.visibility,
+      joinPolicy: community.joinPolicy,
+    },
+  });
+};
+
 export const updateCommunity = async (request: Request, response: Response): Promise<Response> => {
-  const { accessCode, ...communityInput } = request.body as { accessCode?: string };
+  const { accessCode, ...communityInput } = request.body as { accessCode?: string; membershipType?: "free" | "premium"; visibility?: "public" | "private" };
   const update = {
     ...communityInput,
-    ...(accessCode ? { accessCodeHash: await bcrypt.hash(accessCode, 12) } : {}),
+    ...(accessCode ? { accessCodeHash: await bcrypt.hash(accessCode, 12), accessCodeLookupHash: communityCodeLookupHash(accessCode) } : {}),
   };
+  const existing = await CommunityModel.findOne({ _id: request.params.id as string, ownerId: request.auth?.id });
+  if (!existing) throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
+  const nextType = communityInput.membershipType || existing.membershipType;
+  const nextVisibility = communityInput.visibility || existing.visibility;
+  if (nextType === "premium" && (nextVisibility !== "public" || existing.joinPolicy !== "open")) {
+    throw new AppError(422, "Premium communities must be public with open joining", "COMMUNITY_PREMIUM_POLICY_INVALID");
+  }
+  if (existing.membershipType !== "premium" && nextType === "premium") {
+    const otherMembers = await CommunityMemberModel.exists({ communityId: existing._id, userId: { $ne: request.auth?.id }, status: "active" });
+    if (otherMembers || existing.members.some((memberId) => memberId.toString() !== request.auth?.id)) {
+      throw new AppError(409, "Remove existing free members before enabling paid membership", "COMMUNITY_PREMIUM_CONVERSION_BLOCKED");
+    }
+  }
   const community = await CommunityModel.findOneAndUpdate(
     { _id: request.params.id as string, ownerId: request.auth?.id },
     { $set: update },

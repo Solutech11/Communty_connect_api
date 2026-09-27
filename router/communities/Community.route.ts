@@ -24,6 +24,7 @@ import {
   joinCommunity,
   leaveCommunity,
   listCommunities,
+  resolveCommunityCode,
   updateCommunity,
 } from "../../Controller/community.controller";
 import {
@@ -59,6 +60,7 @@ import { validate } from "../../middleware/validate.middleware";
 import { idParamsSchema, objectIdSchema, paginationSchema } from "../../schemas/common.schemas";
 import { reportBodySchema } from "../../schemas/report.schemas";
 import { asyncHandler } from "../../utils/asyncHandler.utils";
+import { communityCodeRateLimiter } from "../../middleware/security.middleware";
 
 const router = Router();
 const communityIdParams = z.object({ id: objectIdSchema });
@@ -72,6 +74,7 @@ const communityBodyBase = z.object({
   coverImageUrl: z.string().url().optional(),
   avatarImageUrl: z.string().url().optional(),
   accessCode: z.string().trim().min(4).max(128).optional(),
+  joinPolicy: z.enum(["open", "approval", "invite_only", "access_code"]).default("open"),
   category: z.string().trim().min(2).max(60),
   state: z.string().trim().max(80).optional(),
   lga: z.string().trim().max(100).optional(),
@@ -85,8 +88,12 @@ const validMembershipPrice = (value: { membershipType?: string; membershipPriceK
 const communityBody = communityBodyBase.refine(validMembershipPrice, {
   message: "Premium communities require a positive membership price",
   path: ["membershipPriceKobo"],
+}).refine((value) => value.joinPolicy !== "access_code" || Boolean(value.accessCode), {
+  message: "An access code is required for code joining", path: ["accessCode"],
+}).refine((value) => value.membershipType !== "premium" || (value.visibility === "public" && value.joinPolicy === "open"), {
+  message: "Premium communities must be public with open joining", path: ["membershipType"],
 });
-const communityUpdateBody = communityBodyBase.partial()
+const communityUpdateBody = communityBodyBase.omit({ joinPolicy: true }).partial()
   .refine((value) => Object.keys(value).length > 0, { message: "At least one field is required" })
   .refine(validMembershipPrice, {
     message: "Premium communities require a positive membership price",
@@ -172,6 +179,7 @@ router.get(
   asyncHandler(listCommunities),
 );
 router.post("/", authenticate, validate({ body: communityBody }), asyncHandler(createCommunity));
+router.post("/resolve-code", authenticate, communityCodeRateLimiter, validate({ body: z.object({ accessCode: z.string().trim().min(4).max(128) }).strict() }), asyncHandler(resolveCommunityCode));
 router.get(
   "/membership-orders/:orderNumber/verify",
   authenticate,

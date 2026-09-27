@@ -35,6 +35,11 @@ import { formatNaira, sendPaymentReceiptEmail } from "../utils/paymentEmail.util
 
 const orderNumber = (): string => `CC-${Date.now()}-${randomUUID().slice(0, 8).toUpperCase()}`;
 const paymentReference = (): string => `ticket_${randomUUID()}`.toLowerCase();
+export const webCallbackUrl = (number: string): string => {
+  const base = env.WEB_BASE_URL || (!env.isProduction ? "http://localhost:5173" : "");
+  if (!base) throw new AppError(503, "Web checkout is unavailable", "WEB_CHECKOUT_UNAVAILABLE");
+  return `${base.replace(/\/+$/, "")}/checkout/return/${encodeURIComponent(number)}`;
+};
 
 const releaseReservation = async (ticketTypeId: unknown, quantity: number): Promise<void> => {
   await TicketTypeModel.updateOne(
@@ -49,6 +54,11 @@ export const createTicketOrder = async (
 ): Promise<Response> => {
   const userId = request.auth?.id as string;
   const idempotencyKey = request.idempotencyKey as string;
+  const checkoutClient = request.body.client === "web" ? "web" : "mobile";
+  if (checkoutClient === "web") {
+    // Fail before reserving capacity when no browser callback is configured.
+    webCallbackUrl("availability-check");
+  }
 
   return withRedisLock(CACHE_KEYS.lock("ticket-order", userId), async () => {
   const existing = await TicketOrderModel.findOne({ buyerId: userId, idempotencyKey })
@@ -129,6 +139,7 @@ export const createTicketOrder = async (
       ticketTypeId: ticketType._id,
       buyerId: userId,
       quantity,
+      checkoutClient,
       ticketSubtotalKobo,
       totalKobo,
       platformFeeKobo,
@@ -179,6 +190,7 @@ export const createTicketOrder = async (
       email: request.auth?.email as string,
       amountKobo: totalKobo,
       reference,
+      ...(checkoutClient === "web" ? { callbackUrl: webCallbackUrl(order.orderNumber) } : {}),
       metadata: {
         purpose: "ticket_purchase",
         orderId: order._id.toString(),
@@ -335,6 +347,7 @@ export const completeTicketOrder = async (
       }
 
       order.status = "paid";
+      order.paidAt = new Date();
       order.paidReference = reference;
       order.paymentReference = reference;
       await order.save({ session });
@@ -595,6 +608,7 @@ export const resumeTicketCheckout = async (
     try {
       checkout = await initializePaystackTransaction({
         email: buyer.email, amountKobo: settled.totalKobo, reference,
+        ...(settled.checkoutClient === "web" ? { callbackUrl: webCallbackUrl(settled.orderNumber) } : {}),
         metadata: {
           purpose: "ticket_purchase", orderId: settled._id.toString(),
           eventId: event._id.toString(), userId: buyerId,

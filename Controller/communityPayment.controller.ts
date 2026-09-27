@@ -4,6 +4,8 @@ import mongoose from "mongoose";
 import { CACHE_KEYS } from "../Constant";
 import { env } from "../Config/env";
 import { CommunityModel } from "../models/Community/Community.model";
+import { CommunityMemberModel } from "../models/Community/CommunityMember.model";
+import { CommunityJoinRequestModel } from "../models/Community/CommunityJoinRequest.model";
 import { CommunityMembershipOrderModel } from "../models/Community/CommunityMembershipOrder.model";
 import { TransactionModel } from "../models/Wallet/Transaction.model";
 import { WalletModel } from "../models/Wallet/Wallet.model";
@@ -37,20 +39,28 @@ export const createCommunityMembershipOrder = async (
     }).select("+checkoutUrl");
 
     if (existing) {
+      if (existing.status === "cancelled" || existing.status === "refunded") {
+        throw new AppError(409, "This membership checkout cannot be retried", "COMMUNITY_ORDER_NOT_RETRYABLE");
+      }
+      if (existing.status === "pending" && !existing.checkoutUrl) {
+        throw new AppError(409, "Membership checkout is still initializing", "COMMUNITY_PAYMENT_PENDING");
+      }
       return sendSuccess(response, 200, "Community membership checkout already initialized", {
         order: existing,
         checkoutUrl: existing.checkoutUrl,
       });
     }
 
-    const community = await CommunityModel.findOne({
-      _id: request.params.id as string,
-      membershipType: "premium",
-      visibility: "public",
-    });
+    const community = await CommunityModel.findOne({ _id: request.params.id as string, membershipType: "premium" });
 
     if (!community) {
       throw new AppError(404, "Premium community was not found", "PREMIUM_COMMUNITY_NOT_FOUND");
+    }
+    if (community.joinPolicy !== "open" || community.visibility !== "public") {
+      const approved = await CommunityJoinRequestModel.exists({
+        communityId: community._id, requesterId: userId, status: "approved",
+      });
+      if (!approved) throw new AppError(403, "Community approval is required before checkout", "COMMUNITY_APPROVAL_REQUIRED");
     }
 
     if (
@@ -58,6 +68,14 @@ export const createCommunityMembershipOrder = async (
       || community.members.some((memberId) => memberId.toString() === userId)
     ) {
       throw new AppError(409, "You already belong to this community", "COMMUNITY_ALREADY_JOINED");
+    }
+    const membership = await CommunityMemberModel.findOne({ communityId: community._id, userId });
+    if (membership?.status === "active" || membership?.status === "banned") {
+      throw new AppError(409, "Community membership is unavailable", "COMMUNITY_MEMBERSHIP_UNAVAILABLE");
+    }
+    const pendingOrder = await CommunityMembershipOrderModel.exists({ communityId: community._id, buyerId: userId, status: "pending" });
+    if (pendingOrder) {
+      throw new AppError(409, "A membership payment is already pending; retry with its original Idempotency-Key", "COMMUNITY_PAYMENT_PENDING");
     }
 
     const [buyerWallet, ownerWallet] = await Promise.all([
@@ -221,6 +239,15 @@ export const completeCommunityMembershipOrder = async (
       if (membershipResult.matchedCount !== 1) {
         throw new AppError(409, "Premium community is unavailable", "COMMUNITY_UNAVAILABLE");
       }
+      const existingMember = await CommunityMemberModel.findOne({ communityId: order.communityId, userId: order.buyerId }).session(session);
+      if (existingMember?.status === "banned") {
+        throw new AppError(409, "Community membership is unavailable", "COMMUNITY_MEMBERSHIP_UNAVAILABLE");
+      }
+      await CommunityMemberModel.updateOne(
+        { communityId: order.communityId, userId: order.buyerId },
+        { $set: { status: "active", role: "member", joinedAt: new Date(), muted: false }, $setOnInsert: { communityId: order.communityId, userId: order.buyerId } },
+        { upsert: true, session },
+      );
 
       order.status = "paid";
       order.paidAt = new Date();

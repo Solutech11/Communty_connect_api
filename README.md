@@ -116,6 +116,7 @@ or admin permissions. `PATCH /users/me` accepts these fields together with
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
 | GET | `/locations/search` | Yes | Search Geoapify address suggestions (required `q`; optional `countryCode`, paired `latitude`/`longitude`, and limit capped at 8) |
+| GET | `/locations/reverse` | No | Rate-limited Geoapify state lookup from required `latitude` and `longitude` |
 
 Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to the mobile app.
 
@@ -124,6 +125,7 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
 | GET | `/events` | Optional | Search/filter events; nearest first when location is supplied or saved |
+| GET | `/events/discover` | No | Browse trending, recently published, and past events with state filtering |
 | GET | `/events/recommended` | Yes | Personalized upcoming ranking, including events with your paid tickets |
 | GET | `/events/created/me` | Yes | List my created events |
 | GET | `/events/{id}` | Conditional | Get event and active ticket types; draft is owner-only |
@@ -154,22 +156,24 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
 | GET | `/communities` | No | Search/filter public communities |
-| GET | `/communities/{id}` | No | Get community details |
-| POST | `/communities` | Yes | Create and join owned community |
+| POST | `/communities/resolve-code` | Yes | Resolve a private access code to a community ID and safe preview |
+| GET | `/communities/{id}` | No | Get public details; private details require active membership |
+| POST | `/communities` | Yes | Atomically create a community and owner membership with optional `joinPolicy` and access code |
 | PATCH | `/communities/{id}` | Yes | Update owned community |
 | POST | `/communities/{id}/members` | Yes | Join a free public community |
-| POST | `/communities/{id}/membership-orders` | Yes + key | Initialize premium membership checkout and platform charge |
+| POST | `/communities/{id}/membership-orders` | Yes + key | Initialize premium checkout; legacy restricted premium communities require approved access |
 | GET | `/communities/membership-orders/{orderNumber}/verify` | Yes | Verify Paystack settlement and activate premium membership |
 | DELETE | `/communities/{id}/members/me` | Yes | Leave community (not owner) |
-| GET | `/communities/{id}/members` | Yes | List safe member profiles |
+| GET | `/communities/{id}/members` | Yes | List membership records with nested safe user profiles and pagination |
 | GET | `/communities/{id}/posts` | Yes | List paginated room posts with author profiles |
 | POST | `/communities/{id}/posts` | Yes | Publish a member room post |
 | GET | `/communities/{id}/announcements` | Yes | List paginated room announcements |
 | POST | `/communities/{id}/announcements` | Owner/mod | Publish a room announcement |
-| GET | `/communities/{id}/messages` | Yes | List paginated room message history |
+| GET | `/communities/{id}/messages` | Yes | List cursor paginated room messages with `pageInfo` |
 | POST | `/communities/{id}/messages` | Yes | Send idempotent room message |
 | POST | `/communities/{id}/reports` | Yes | Report an accessible community for moderation |
-| GET | `/users/me/communities` | Yes | List my active/pending communities with unread counts |
+| GET | `/users/me/communities` | Yes | List my memberships with unread counts and notification level |
+| GET | `/users/me/community-join-requests` | Yes | Restore my pending community join requests |
 | GET | `/communities/{id}/rules` | Public/member | Get public or accessible community rules |
 | PUT | `/communities/{id}/rules` | Owner/mod | Replace ordered community rules and consequences |
 | GET | `/communities/{id}/settings` | Member | Get messaging and join settings |
@@ -178,7 +182,7 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | DELETE | `/communities/{id}/members/{userId}` | Owner/mod | Remove an eligible community member |
 | PUT | `/communities/{id}/bans/{userId}` | Owner/mod | Ban a member with reason and optional expiry |
 | DELETE | `/communities/{id}/bans/{userId}` | Owner/mod | Unban a removed member |
-| POST | `/communities/{id}/join-requests` | Yes | Join open communities or request/validate private access |
+| POST | `/communities/{id}/join-requests` | Yes | Join free communities or validate access and request approval; premium access requires checkout |
 | POST | `/communities/{id}/invites` | Owner/mod | Create hashed, expiring, use-limited invite token |
 | GET | `/communities/{id}/join-requests` | Owner/mod | Review queued membership requests |
 | PATCH | `/communities/{id}/join-requests/{requestId}` | Owner/mod | Approve or reject a join request |
@@ -201,6 +205,8 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | GET | `/communities/{id}/calls/active` | Member | Get active call |
 | POST | `/communities/{id}/calls/{callId}/join` | Member | Get short-lived server-issued call credential |
 | DELETE | `/communities/{id}/calls/{callId}` | Starter/mod | End active call |
+
+Private code lookup uses a keyed index created when an access code is set. Owners of pre-existing private communities must rotate their access code once through `PATCH /communities/{id}/settings` to enable code-only lookup. Creating a private community with `joinPolicy` and `accessCode` in one request creates the community and owner membership in a MongoDB transaction.
 | GET | `/friends` | Yes | List accepted friendships with safe requester/addressee profiles |
 | GET | `/friends/requests` | Yes | List inbound requests with safe requester/addressee profiles |
 | GET | `/friends/suggestions` | Yes | List users outside current graph |
@@ -218,6 +224,7 @@ Set `GEOAPIFY_API_KEY` in the backend environment. The key is never returned to 
 | POST | `/chat/conversations/{id}/messages` | Yes | Send idempotent client message and emit socket event |
 | POST | `/chat/conversations/{id}/read` | Yes | Record and emit read receipt |
 | POST | `/ai/chat` | Yes | Community Connect AI assistant |
+| POST | `/ai/guest-chat` | No | Rate-limited public AI chat; visitor text is sent to Groq |
 | POST | `/ai/event-copy` | Yes | Generate grounded event copy |
 | POST | `/ai/event-recommendations` | Yes | Run the local recommendation model with optional preferences/location |
 | POST | `/ai/conversations/{id}/summary` | Yes | Summarize participant-owned conversation |

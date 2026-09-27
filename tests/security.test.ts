@@ -33,6 +33,12 @@ test("CORS allows the API origin used by the server-rendered admin portal", () =
   assert.ok(env.allowedOrigins.includes(new URL(env.APP_BASE_URL).origin));
 });
 
+test("CORS includes the configured website origin for ticket checkout", () => {
+  if (env.WEB_BASE_URL) {
+    assert.ok(env.allowedOrigins.includes(new URL(env.WEB_BASE_URL).origin));
+  }
+});
+
 
 test("development CORS accepts local browser and Expo origins", () => {
   assert.equal(isCorsOriginAllowed("http://localhost:5173"), true);

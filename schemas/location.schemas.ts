@@ -19,3 +19,10 @@ export const locationSearchQuerySchema = z.object({
 );
 
 export type LocationSearchQuery = z.infer<typeof locationSearchQuerySchema>;
+
+export const locationReverseQuerySchema = z.object({
+  latitude: queryNumber(-90, 90),
+  longitude: queryNumber(-180, 180),
+}).strict();
+
+export type LocationReverseQuery = z.infer<typeof locationReverseQuerySchema>;

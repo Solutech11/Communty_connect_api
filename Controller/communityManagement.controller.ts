@@ -6,6 +6,7 @@ import { CommunityContentModel } from "../models/Community/CommunityContent.mode
 import { CommunityJoinRequestModel } from "../models/Community/CommunityJoinRequest.model";
 import { CommunityInviteModel } from "../models/Community/CommunityInvite.model";
 import { CommunityMemberModel, type CommunityMember } from "../models/Community/CommunityMember.model";
+import { CommunityMembershipOrderModel } from "../models/Community/CommunityMembershipOrder.model";
 import { UserModel } from "../models/Auth/User.model";
 import {
   getCommunityAndMembership,
@@ -15,6 +16,7 @@ import {
   ensureCommunityMemberRecords,
 } from "../utils/communityAccess.utils";
 import { AppError } from "../utils/AppError";
+import { communityCodeLookupHash } from "../utils/communityCode.utils";
 import { sendSuccess } from "../utils/response.utils";
 
 const toViewerMembership = (membership: CommunityMember | null) => {
@@ -24,6 +26,7 @@ const toViewerMembership = (membership: CommunityMember | null) => {
     status: membership.status,
     joinedAt: membership.joinedAt.toISOString(),
     muted: membership.muted,
+    notificationLevel: membership.notificationLevel || (membership.muted ? "muted" : "all"),
   };
 };
 
@@ -94,6 +97,8 @@ export const listMyCommunities = async (request: Request, response: Response): P
   if (role) query.role = role;
 
   const memberships = await CommunityMemberModel.find(query).populate("communityId").sort({ updatedAt: -1 });
+  const paidOrders = await CommunityMembershipOrderModel.find({ buyerId: request.auth?.id, status: "paid" }).select("communityId");
+  const paidCommunityIds = new Set(paidOrders.map((order) => order.communityId.toString()));
   const summaries = await Promise.all(memberships.map(async (membership) => {
     const community = membership.communityId as unknown as {
       _id: { toString(): string };
@@ -114,6 +119,8 @@ export const listMyCommunities = async (request: Request, response: Response): P
       createdAt: Date;
     } | null;
     if (!community) return null;
+    if (community.membershipType === "premium" && membership.status === "active"
+      && community.ownerId.toString() !== request.auth?.id && !paidCommunityIds.has(community._id.toString())) return null;
 
     const unreadQuery: Record<string, unknown> = {
       communityId: community._id,
@@ -156,6 +163,21 @@ export const listMyCommunities = async (request: Request, response: Response): P
   const total = filtered.length;
   return sendSuccess(response, 200, "My communities retrieved", {
     communities: filtered.slice((page - 1) * limit, page * limit),
+    pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+  });
+};
+
+export const listMyCommunityJoinRequests = async (request: Request, response: Response): Promise<Response> => {
+  const page = Number(request.query.page || 1);
+  const limit = Number(request.query.limit || 20);
+  const query = { requesterId: request.auth?.id, status: "pending" as const };
+  const [joinRequests, total] = await Promise.all([
+    CommunityJoinRequestModel.find(query).populate("communityId", "name imageUrl visibility membershipType membershipPriceKobo joinPolicy")
+      .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+    CommunityJoinRequestModel.countDocuments(query),
+  ]);
+  return sendSuccess(response, 200, "My community join requests retrieved", {
+    joinRequests,
     pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
   });
 };
@@ -227,9 +249,15 @@ export const getCommunitySettings = async (request: Request, response: Response)
 
 export const updateCommunitySettings = async (request: Request, response: Response): Promise<Response> => {
   const { community } = await requireCommunityModerator(request.params.id as string, request.auth?.id as string);
-  const { accessCode, ...settings } = request.body as { accessCode?: string };
+  const { accessCode, ...settings } = request.body as { accessCode?: string; joinPolicy?: "open" | "approval" | "invite_only" | "access_code" };
+  if (community.membershipType === "premium" && settings.joinPolicy && settings.joinPolicy !== "open") {
+    throw new AppError(422, "Premium communities must use open joining", "COMMUNITY_PREMIUM_POLICY_INVALID");
+  }
   community.set(settings);
-  if (accessCode) community.accessCodeHash = await bcrypt.hash(accessCode, 12);
+  if (accessCode) {
+    community.accessCodeHash = await bcrypt.hash(accessCode, 12);
+    community.accessCodeLookupHash = communityCodeLookupHash(accessCode);
+  }
   await community.save();
   return sendSuccess(response, 200, "Community settings updated", { settings: settingsPayload(community) });
 };
@@ -263,7 +291,7 @@ export const listCommunityMembersDetailed = async (request: Request, response: R
 };
 
 export const updateCommunityMember = async (request: Request, response: Response): Promise<Response> => {
-  const { membership: actor } = await requireCommunityModerator(request.params.id as string, request.auth?.id as string);
+  const { community, membership: actor } = await requireCommunityModerator(request.params.id as string, request.auth?.id as string);
   const target = await CommunityMemberModel.findOne({ communityId: request.params.id as string, userId: request.params.userId as string })
     .populate("userId", "firstName lastName avatarUrl state lga");
   if (!target) throw new AppError(404, "Community member was not found", "COMMUNITY_MEMBER_REQUIRED");
@@ -271,6 +299,10 @@ export const updateCommunityMember = async (request: Request, response: Response
   if (request.body.role && actor.role !== "owner") throw new AppError(403, "Only the community owner can change roles", "COMMUNITY_OWNER_REQUIRED");
   if (request.body.status && actor.role === "moderator" && target.role === "moderator") {
     throw new AppError(403, "Moderators cannot change another moderator", "COMMUNITY_OWNER_REQUIRED");
+  }
+  if (request.body.status === "active" && target.status !== "active" && community.membershipType === "premium") {
+    const paid = await CommunityMembershipOrderModel.exists({ communityId: community._id, buyerId: request.params.userId as string, status: "paid" });
+    if (!paid) throw new AppError(409, "Premium membership payment is required", "COMMUNITY_MEMBERSHIP_PAYMENT_REQUIRED");
   }
 
   target.set(request.body);
@@ -337,6 +369,21 @@ export const createCommunityJoinRequest = async (request: Request, response: Res
   }
   if (membership?.status === "active") throw new AppError(409, "You are already a community member", "COMMUNITY_MEMBERSHIP_EXISTS");
 
+  if (community.visibility === "private" && (community.joinPolicy === "approval" || community.joinPolicy === "open")) {
+    const securedCommunity = await CommunityModel.findById(community._id).select("+accessCodeHash");
+    const validCode = Boolean(request.body.accessCode && securedCommunity?.accessCodeHash
+      && await bcrypt.compare(request.body.accessCode, securedCommunity.accessCodeHash));
+    const invites = request.body.inviteToken ? await CommunityInviteModel.find({
+      communityId: community._id, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() },
+    }).select("+tokenHash") : [];
+    const validInvite = (await Promise.all(invites.map(async (invite) =>
+      invite.uses < invite.maxUses && await bcrypt.compare(request.body.inviteToken, invite.tokenHash)
+    ))).some(Boolean);
+    if (!validCode && !validInvite) {
+      throw new AppError(422, "A valid community code or invite is required", "COMMUNITY_ACCESS_REQUIRED");
+    }
+  }
+
   const activateMembership = async () => {
     const activeMembership = await CommunityMemberModel.findOneAndUpdate(
       { communityId: community._id, userId: request.auth?.id },
@@ -346,10 +393,24 @@ export const createCommunityJoinRequest = async (request: Request, response: Res
     await syncLegacyMembershipArrays(community._id.toString(), request.auth?.id as string, "member", true);
     return sendSuccess(response, 201, "Community joined", { membership: toViewerMembership(activeMembership) });
   };
+  const preparePremiumCheckout = async () => {
+    const joinRequest = await CommunityJoinRequestModel.findOneAndUpdate(
+      { communityId: community._id, requesterId: request.auth?.id, status: "approved" },
+      { $setOnInsert: { communityId: community._id, requesterId: request.auth?.id, status: "approved", message: request.body.message || "" } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    await CommunityMemberModel.updateOne(
+      { communityId: community._id, userId: request.auth?.id },
+      { $set: { role: "member", status: "pending" }, $setOnInsert: { communityId: community._id, userId: request.auth?.id } },
+      { upsert: true },
+    );
+    await joinRequest.populate("requesterId", "firstName lastName avatarUrl");
+    return sendSuccess(response, 201, "Community membership checkout required", { joinRequest });
+  };
   if (community.joinPolicy === "open" && community.visibility === "public" && community.membershipType === "free") {
     return activateMembership();
   }
-  if (community.membershipType === "premium" && community.joinPolicy !== "approval") {
+  if (community.membershipType === "premium" && community.joinPolicy === "open" && community.visibility === "public") {
     throw new AppError(422, "Premium community membership must be paid before activation", "COMMUNITY_MEMBERSHIP_PAYMENT_REQUIRED");
   }
   if (community.joinPolicy === "access_code") {
@@ -357,6 +418,7 @@ export const createCommunityJoinRequest = async (request: Request, response: Res
     const valid = Boolean(request.body.accessCode && securedCommunity?.accessCodeHash
       && await bcrypt.compare(request.body.accessCode, securedCommunity.accessCodeHash));
     if (!valid) throw new AppError(422, "The community access code is invalid", "COMMUNITY_ACCESS_CODE_INVALID");
+    if (community.membershipType === "premium") return preparePremiumCheckout();
     return activateMembership();
   }
   if (community.joinPolicy === "invite_only") {
@@ -376,8 +438,10 @@ export const createCommunityJoinRequest = async (request: Request, response: Res
       { $inc: { uses: 1 } },
     );
     if (consumed.modifiedCount !== 1) throw new AppError(422, "The community invite is no longer available", "COMMUNITY_INVITE_INVALID");
+    if (community.membershipType === "premium") return preparePremiumCheckout();
     return activateMembership();
   }
+  if (community.membershipType === "premium" && community.joinPolicy === "open") return preparePremiumCheckout();
   try {
     const joinRequest = await CommunityJoinRequestModel.create({
       communityId: community._id,
@@ -431,7 +495,7 @@ export const listCommunityJoinRequests = async (request: Request, response: Resp
 };
 
 export const reviewCommunityJoinRequest = async (request: Request, response: Response): Promise<Response> => {
-  await requireCommunityModerator(request.params.id as string, request.auth?.id as string);
+  const { community } = await requireCommunityModerator(request.params.id as string, request.auth?.id as string);
   const joinRequest = await CommunityJoinRequestModel.findOne({
     _id: request.params.requestId as string,
     communityId: request.params.id as string,
@@ -447,13 +511,21 @@ export const reviewCommunityJoinRequest = async (request: Request, response: Res
 
   let member;
   if (joinRequest.status === "approved") {
+    const paid = community.membershipType === "premium" && Boolean(await CommunityMembershipOrderModel.exists({
+      communityId: community._id,
+      buyerId: joinRequest.requesterId,
+      status: "paid",
+    }));
+    const activate = community.membershipType === "free" || paid;
     member = await CommunityMemberModel.findOneAndUpdate(
       { communityId: joinRequest.communityId, userId: joinRequest.requesterId },
-      { $set: { role: "member", status: "active", joinedAt: new Date() } },
+      { $set: { role: "member", status: activate ? "active" : "pending", joinedAt: new Date() } },
       { new: true, upsert: true, setDefaultsOnInsert: true },
     ).populate("userId", "firstName lastName avatarUrl state lga");
-    await syncLegacyMembershipArrays(request.params.id as string, joinRequest.requesterId.toString(), "member", true);
-    await emitMemberUpdate(request, joinRequest.requesterId.toString());
+    if (activate) {
+      await syncLegacyMembershipArrays(request.params.id as string, joinRequest.requesterId.toString(), "member", true);
+      await emitMemberUpdate(request, joinRequest.requesterId.toString());
+    }
   }
   await joinRequest.populate("requesterId", "firstName lastName avatarUrl");
   return sendSuccess(response, 200, "Community join request reviewed", {

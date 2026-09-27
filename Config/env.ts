@@ -30,6 +30,7 @@ const envSchema = z.object({
   PAYSTACK_PUBLIC_KEY: z.string().min(10),
   PAYSTACK_BASE_URL: z.string().url().default("https://api.paystack.co"),
   PAYSTACK_CALLBACK_URL: z.string().min(1),
+  WEB_BASE_URL: z.string().url().or(z.literal("")).default(""),
   PAYSTACK_CURRENCY: z.string().length(3).default("NGN"),
   MIN_TOPUP_KOBO: z.coerce.number().int().positive().default(10000),
   MIN_WITHDRAWAL_KOBO: z.coerce.number().int().positive().default(100000),
@@ -101,12 +102,13 @@ const configuredBrowserOrigins = parsed.data.FRONTEND_URLS.split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const appOrigin = new URL(parsed.data.APP_BASE_URL).origin;
+const websiteOrigin = parsed.data.WEB_BASE_URL ? new URL(parsed.data.WEB_BASE_URL).origin : null;
 
 export const env = {
   ...parsed.data,
   // The server-rendered admin portal posts back to APP_BASE_URL. Include that
   // same origin so CORS does not reject its browser form submissions.
-  allowedOrigins: [...new Set([...configuredBrowserOrigins, appOrigin])],
+  allowedOrigins: [...new Set([...configuredBrowserOrigins, appOrigin, ...(websiteOrigin ? [websiteOrigin] : [])])],
   isProduction: parsed.data.NODE_ENV === "production",
   isTest: parsed.data.NODE_ENV === "test",
 };

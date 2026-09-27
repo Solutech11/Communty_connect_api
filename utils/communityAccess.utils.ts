@@ -4,6 +4,7 @@ import {
   CommunityMemberModel,
   type CommunityMember,
 } from "../models/Community/CommunityMember.model";
+import { CommunityMembershipOrderModel } from "../models/Community/CommunityMembershipOrder.model";
 import { AppError } from "./AppError";
 
 type CommunityWithId = HydratedDocument<Community>;
@@ -20,6 +21,11 @@ export const ensureCommunityMemberRecords = async (
   moderatorIds.forEach((moderatorId) => memberIds.add(moderatorId));
 
   await Promise.all([...memberIds].map(async (userId) => {
+    // Legacy arrays alone are not proof of a paid premium membership.
+    if (community.membershipType === "premium" && userId !== ownerId) {
+      const paid = await CommunityMembershipOrderModel.exists({ communityId: community._id, buyerId: userId, status: "paid" });
+      if (!paid) return;
+    }
     const role = userId === ownerId
       ? "owner"
       : moderatorIds.has(userId)
@@ -58,6 +64,10 @@ export const getCommunityAndMembership = async (
 
   await ensureCommunityMemberRecords(community);
   const membership = await CommunityMemberModel.findOne({ communityId: community._id, userId });
+  if (community.membershipType === "premium" && userId !== community.ownerId.toString() && membership?.status === "active") {
+    const paid = await CommunityMembershipOrderModel.exists({ communityId: community._id, buyerId: userId, status: "paid" });
+    if (!paid) return { community, membership: null };
+  }
   return { community, membership };
 };
 

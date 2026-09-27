@@ -202,6 +202,53 @@ const checkInPreviewDataSchema: OpenApiSchema = {
 };
 
 export const ticketResponseSchemaContracts: Record<string, Record<string, OpenApiSchema>> = {
+  "GET /communities/{id}": { "data.community.ownerId": strictObject({
+    _id: objectIdResponseSchema,
+    firstName: { type: "string" },
+    lastName: { type: "string" },
+    avatarUrl: { type: "string" },
+  }, ["_id", "firstName", "lastName"]) },
+  "GET /communities/{id}/members": { "data.members[]": strictObject({
+    user: strictObject({
+      _id: objectIdResponseSchema,
+      firstName: { type: "string" },
+      lastName: { type: "string" },
+      avatarUrl: { type: "string" },
+      state: { type: "string" },
+      lga: { type: "string" },
+    }, ["_id", "firstName", "lastName", "avatarUrl", "state", "lga"]),
+    communityRole: { type: "string", enum: ["owner", "moderator", "member"] },
+    status: { type: "string", enum: ["active", "banned"] },
+    joinedAt: { type: "string", format: "date-time" },
+  }, ["user", "communityRole", "status", "joinedAt"]) },
+  "POST /communities/{id}/join-requests": { data: {
+    type: "object",
+    properties: {
+      membership: { type: "object", properties: { status: { type: "string", enum: ["active"] } } },
+      joinRequest: { type: "object", properties: { status: { type: "string", enum: ["pending", "approved", "rejected", "cancelled"] } } },
+    },
+    oneOf: [
+      strictObject({ membership: strictObject({
+        role: { type: "string", enum: ["member"] },
+        status: { type: "string", enum: ["active"] },
+        joinedAt: { type: "string", format: "date-time" },
+        muted: { type: "boolean" },
+        notificationLevel: { type: "string", enum: ["all", "announcements", "mentions", "muted"] },
+      }, ["role", "status", "joinedAt", "muted", "notificationLevel"]) }, ["membership"]),
+      strictObject({ joinRequest: { type: "object", required: ["_id", "communityId", "requesterId", "status", "createdAt"], properties: {
+        _id: objectIdResponseSchema,
+        communityId: objectIdResponseSchema,
+        requesterId: { type: "object", additionalProperties: true },
+        message: { type: "string" },
+        status: { type: "string", enum: ["pending", "approved"] },
+        createdAt: { type: "string", format: "date-time" },
+      } } }, ["joinRequest"]),
+    ],
+  } },
+  "GET /communities/{id}/messages": { "data.pageInfo": strictObject({
+    nextCursor: { type: ["string", "null"] },
+    hasMore: { type: "boolean" },
+  }, ["nextCursor", "hasMore"]) },
   "GET /events/{id}": { "data.ticketTypes[]": ticketTypeResponseSchema },
   "POST /events/{id}/ticket-types": { "data.ticketType": ticketTypeResponseSchema },
   "PATCH /events/{id}/ticket-types/{ticketTypeId}": { "data.ticketType": ticketTypeResponseSchema },
@@ -296,7 +343,7 @@ const responseEnumContractsByObject: Record<string, Record<string, OpenApiEnumVa
     joinPolicy: ["open", "approval", "invite_only", "access_code"],
     messagePermission: ["everyone", "moderators"],
   },
-  viewerMembership: { role: communityMemberRoles, status: communityMemberStatuses },
+  viewerMembership: { role: communityMemberRoles, status: communityMemberStatuses, notificationLevel: communityNotificationLevels },
   member: {
     communityRole: communityMemberRoles,
     status: communityMemberStatuses,
@@ -608,7 +655,7 @@ const community = {
   visibility: "public",
   membershipType: "premium",
   membershipPriceKobo: 200000,
-  joinPolicy: "approval",
+  joinPolicy: "open",
   messagePermission: "everyone",
   membersCanCreatePosts: true,
   membersCanInvite: false,
@@ -918,7 +965,8 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "PATCH /communities/{id}/settings": jsonBody({ joinPolicy: "access_code", accessCode: "COMMUNITY-ACCESS-2026", messagePermission: "moderators", membersCanCreatePosts: true, membersCanInvite: false, showMemberList: true }, [], "Send at least one community setting. Access codes are only written; they are never returned by the API."),
   "PATCH /communities/{id}/members/{userId}": jsonBody({ role: "moderator", status: "active" }, [], "Owners may change roles; owners and moderators may update eligible member status."),
   "PUT /communities/{id}/bans/{userId}": jsonBody({ reason: "Repeated harassment in community messages.", expiresAt: "2026-12-31T23:59:59.000Z" }, ["reason"]),
-  "POST /communities/{id}/join-requests": jsonBody({ message: "I would like to join the community." }, [], "For an open free public community this activates membership immediately; otherwise a pending request is created."),
+  "POST /communities/{id}/join-requests": jsonBody({ message: "I would like to join the community.", accessCode: "COMMUNITY-ACCESS-2026" }, [], "A free direct join returns data.membership. Approval or validated premium access returns data.joinRequest; premium access remains pending payment. Private communities require a valid code or invite token."),
+  "POST /communities/resolve-code": jsonBody({ accessCode: "COMMUNITY-ACCESS-2026" }, ["accessCode"], "Resolve a private code-joined community before joining by ID. Invalid codes return 404."),
   "PATCH /communities/{id}/join-requests/{requestId}": jsonBody({ status: "approved", note: "Welcome to the community." }, ["status"]),
   "POST /communities/{id}/invites": jsonBody({ expiresAt: "2026-12-31T23:59:59.000Z", maxUses: 10 }, ["expiresAt"]),
   "POST /communities/{id}/calls": jsonBody({ type: "video", title: "Weekly planning" }, ["type"]),
@@ -930,13 +978,13 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "PATCH /communities/{id}/posts/{postId}": jsonBody({ text: "Updated weekly community update.", imageUrl: "https://res.cloudinary.com/example/community-post.webp" }, [], "Send at least one editable post field."),  "POST /communities/{id}/ownership-transfer": jsonBody({ newOwnerId: secondId, currentPassword: "StrongPass1!" }, ["newOwnerId"]),
   "POST /events": jsonBody({ title: "Lagos Tech Meetup 2026", description: "An evening of practical talks, networking, and community building.", coverImageUrl: "https://res.cloudinary.com/example/event.webp", activityType: "Technology", targetAudience: "Developers and founders", setting: "indoor", country: "Nigeria", state: "Lagos", lga: "Ikeja", venueName: "Community Hall", address: "12 Example Street, Ikeja", coordinates: { type: "Point", coordinates: [3.3792, 6.5244] }, startsAt: "2026-09-20T16:00:00.000Z", endsAt: "2026-09-20T20:00:00.000Z", timezone: "Africa/Lagos", contactPhone: "+2348012345678", maxCapacity: 250, tags: ["technology", "networking"] }, ["title", "description", "activityType", "setting", "state", "lga", "venueName", "address", "startsAt", "endsAt", "maxCapacity"]),
   "PATCH /events/{id}": jsonBody({ title: "Updated Lagos Tech Meetup 2026", description: "Updated event description with enough information for attendees.", startsAt: "2026-09-20T17:00:00.000Z", endsAt: "2026-09-20T21:00:00.000Z", maxCapacity: 300 }, [], "Send at least one event field. Drafts and declined events are editable; editing a declined event resets it to draft. If both dates are sent, endsAt must be later than startsAt."),
-  "POST /events/{id}/orders": jsonBody({ ticketTypeId: secondId, quantity: 1 }, ["ticketTypeId", "quantity"]),
+  "POST /events/{id}/orders": jsonBody({ ticketTypeId: secondId, quantity: 1, client: "web" }, ["ticketTypeId", "quantity"], "Optional client selects a server-configured browser callback; mobile remains the default."),
   "POST /events/{id}/ticket-types": jsonBody({ title: "General Admission", description: "Standard event access", priceKobo: 500000, capacity: 200 }, ["title", "priceKobo"]),
   "PATCH /events/{id}/ticket-types/{ticketTypeId}": jsonBody({ title: "Early Bird", description: "Discounted early access", priceKobo: 400000, capacity: 100 }, [], "Send at least one ticket-type field."),
   "POST /events/{eventId}/check-ins/verify": jsonBody({ qrToken: "opaque-ticket-token-at-least-thirty-two-characters" }, ["qrToken"]),
   "POST /events/{id}/check-ins": jsonBody({ qrToken: "opaque-ticket-token-at-least-thirty-two-characters" }, ["qrToken"]),
 
-  "POST /communities": jsonBody({ name: "Lagos Product Builders", description: "A community for product designers, engineers, and founders in Lagos.", imageUrl: "https://res.cloudinary.com/example/community.webp", category: "Technology", state: "Lagos", lga: "Ikeja", visibility: "public", membershipType: "premium", membershipPriceKobo: 200000 }, ["name", "description", "category"]),
+  "POST /communities": jsonBody({ name: "Lagos Product Builders", description: "A community for product designers, engineers, and founders in Lagos.", imageUrl: "https://res.cloudinary.com/example/community.webp", category: "Technology", state: "Lagos", lga: "Ikeja", visibility: "private", membershipType: "free", membershipPriceKobo: 0, joinPolicy: "access_code", accessCode: "COMMUNITY-ACCESS-2026" }, ["name", "description", "category"]),
   "PATCH /communities/{id}": jsonBody({ description: "Updated community description for product builders across Lagos.", membershipType: "premium", membershipPriceKobo: 250000 }, [], "Send at least one community field. Premium communities require a positive membershipPriceKobo."),
   "POST /communities/{id}/posts": jsonBody({ text: "Welcome to our weekly community update.", imageUrl: "https://res.cloudinary.com/example/community-post.webp" }, ["text"]),
   "POST /communities/{id}/announcements": jsonBody({ text: "Saturday's meetup starts at 10:00 AM.", imageUrl: "https://res.cloudinary.com/example/announcement.webp" }, ["text"]),
@@ -951,6 +999,7 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "POST /chat/conversations/{id}/messages": jsonBody({ clientMessageId: "mobile-1784370000000", type: "text", text: "Hello, are you attending the meetup?", mediaUrl: "https://res.cloudinary.com/example/chat-image.webp" }, ["clientMessageId"], "clientMessageId and either text or mediaUrl are required."),
 
   "POST /ai/chat": jsonBody({ message: "Recommend technology events near Ikeja.", sessionId: id }, ["message"]),
+  "POST /ai/guest-chat": jsonBody({ message: "What events are coming up in Lagos?", state: "Lagos", history: [] }, ["message"], "Guest messages and supplied short history are sent to Groq. No personal account context is included."),
   "POST /ai/event-copy": jsonBody({ title: "Lagos Tech Meetup", activityType: "Technology", targetAudience: "Developers and founders", setting: "indoor", details: "Practical talks and networking in Ikeja." }, ["title", "activityType"]),
   "POST /ai/event-recommendations": jsonBody({ preferences: { categories: ["technology", "networking"] }, latitude: 6.5244, longitude: 3.3792, radiusKm: 50, limit: 20 }, [], "latitude and longitude must be supplied together when either is present."),
 
@@ -1066,22 +1115,24 @@ for (const key of ["POST /events/{eventId}/check-ins/verify", "POST /events/{id}
   }
 }
 
-const strictObject = (
+function strictObject(
   properties: Record<string, OpenApiSchema>,
   required: string[] = [],
   additionalPropertiesOrDescription: boolean | string = false,
   allowAdditionalProperties = false,
-): OpenApiSchema => ({
-  type: "object",
-  additionalProperties: typeof additionalPropertiesOrDescription === "boolean"
-    ? additionalPropertiesOrDescription
-    : allowAdditionalProperties,
-  ...(typeof additionalPropertiesOrDescription === "string"
-    ? { description: additionalPropertiesOrDescription }
-    : {}),
-  required,
-  properties,
-});
+): OpenApiSchema {
+  return {
+    type: "object",
+    additionalProperties: typeof additionalPropertiesOrDescription === "boolean"
+      ? additionalPropertiesOrDescription
+      : allowAdditionalProperties,
+    ...(typeof additionalPropertiesOrDescription === "string"
+      ? { description: additionalPropertiesOrDescription }
+      : {}),
+    required,
+    properties,
+  };
+}
 
 const geoPointRequestSchema: OpenApiSchema = {
   ...strictObject({
@@ -1110,6 +1161,7 @@ const communityRequestSchema: OpenApiSchema = strictObject({
   coverImageUrl: { type: "string", format: "uri" },
   avatarImageUrl: { type: "string", format: "uri" },
   accessCode: { type: "string", minLength: 4, maxLength: 128 },
+  joinPolicy: { type: "string", enum: ["open", "approval", "invite_only", "access_code"], default: "open" },
   category: { type: "string", minLength: 2, maxLength: 60 },
   state: { type: "string", maxLength: 80 },
   lga: { type: "string", maxLength: 100 },
@@ -1117,6 +1169,17 @@ const communityRequestSchema: OpenApiSchema = strictObject({
   membershipType: { type: "string", enum: ["free", "premium"], default: "free" },
   membershipPriceKobo: { type: "integer", minimum: 0, maximum: 10_000_000_000, default: 0 },
 });
+communityRequestSchema.allOf = [
+  { if: { properties: { joinPolicy: { const: "access_code" } }, required: ["joinPolicy"] }, then: { required: ["accessCode"] } },
+  { if: { properties: { membershipType: { const: "premium" } }, required: ["membershipType"] }, then: {
+    properties: {
+      visibility: { const: "public" },
+      joinPolicy: { const: "open" },
+      membershipPriceKobo: { type: "integer", exclusiveMinimum: 0 },
+    },
+    required: ["membershipPriceKobo"],
+  } },
+];
 
 const eventRequestSchema: OpenApiSchema = strictObject({
   title: { type: "string", minLength: 4, maxLength: 140 },
@@ -1327,6 +1390,7 @@ export const requestBodySchemaContracts: Record<string, OpenApiSchema> = {
   "POST /events/{id}/orders": strictObject({
     ticketTypeId: objectIdResponseSchema,
     quantity: { type: "integer", minimum: 1, maximum: 20 },
+    client: { type: "string", enum: ["mobile", "web"] },
   }, ["ticketTypeId", "quantity"]),
   "POST /events/{id}/ticket-types": strictObject(ticketTypeRequestProperties, ["title", "priceKobo"]),
   "PATCH /events/{id}/ticket-types/{ticketTypeId}": {
@@ -1342,8 +1406,10 @@ export const requestBodySchemaContracts: Record<string, OpenApiSchema> = {
   "POST /events/{id}/reports": reportRequestSchema,
 
   "POST /communities": communityRequestSchema,
+  "POST /communities/resolve-code": strictObject({ accessCode: { type: "string", minLength: 4, maxLength: 128 } }, ["accessCode"]),
   "PATCH /communities/{id}": {
     ...communityRequestSchema,
+    properties: Object.fromEntries(Object.entries(communityRequestSchema.properties as Record<string, OpenApiSchema>).filter(([name]) => name !== "joinPolicy")),
     required: [],
     minProperties: 1,
   },
@@ -1385,6 +1451,14 @@ export const requestBodySchemaContracts: Record<string, OpenApiSchema> = {
   "POST /ai/chat": strictObject({
     message: { type: "string", minLength: 1, maxLength: 4000 },
     sessionId: objectIdResponseSchema,
+  }, ["message"]),
+  "POST /ai/guest-chat": strictObject({
+    message: { type: "string", minLength: 1, maxLength: 1000 },
+    state: { type: "string", minLength: 2, maxLength: 80 },
+    history: { type: "array", maxItems: 6, items: strictObject({
+      role: { type: "string", enum: ["user", "assistant"] },
+      content: { type: "string", minLength: 1, maxLength: 1000 },
+    }, ["role", "content"]) },
   }, ["message"]),
   "POST /ai/event-copy": strictObject({
     title: { type: "string", minLength: 2, maxLength: 140 },
@@ -1460,6 +1534,10 @@ export const applyRequestBodySchemaContracts = (schema: OpenApiSchema, operation
 };
 
 export const queryParameterContracts: Record<string, QueryParameterContract[]> = {
+  "GET /locations/reverse": [
+    { ...query("latitude", "Latitude sent to Geoapify for state lookup.", { type: "number", minimum: -90, maximum: 90 }, 6.5244), required: true },
+    { ...query("longitude", "Longitude sent to Geoapify for state lookup.", { type: "number", minimum: -180, maximum: 180 }, 3.3792), required: true },
+  ],
   "GET /locations/search": [
     { ...query("q", "Location search text.", { type: "string", minLength: 1, maxLength: 200 }, "Eko Hotel"), required: true },
     query("countryCode", "Optional ISO 3166-1 alpha-2 country code.", { type: "string", pattern: "^[A-Za-z]{2}$" }, "NG"),
@@ -1475,6 +1553,7 @@ export const queryParameterContracts: Record<string, QueryParameterContract[]> =
     query("status", "Filter active or pending membership.", { type: "string", enum: ["pending", "active"] }, "active"),
     query("unreadOnly", "Only include communities with unread messages.", { type: "string", enum: ["true", "false"] }, "true"),
   ],
+  "GET /users/me/community-join-requests": paginationQuery.slice(0, 2),
   "GET /communities/{id}/members": [
     ...paginationQuery,
     query("search", "Search member name.", { type: "string", maxLength: 100 }, "Ada"),
@@ -1492,6 +1571,12 @@ export const queryParameterContracts: Record<string, QueryParameterContract[]> =
     query("latitude", "Latitude; must be supplied with longitude.", { type: "number", minimum: -90, maximum: 90 }, 6.5244),
     query("longitude", "Longitude; must be supplied with latitude.", { type: "number", minimum: -180, maximum: 180 }, 3.3792),
     query("radiusKm", "Maximum geospatial radius in kilometres.", { type: "number", exclusiveMinimum: 0, maximum: 500, default: 100 }, 50),
+  ],
+  "GET /events/discover": [
+    { ...query("section", "Discovery section.", { type: "string", enum: ["trending", "recent", "past"] }, "trending"), required: true },
+    query("state", "Filter by Nigerian state.", { type: "string", minLength: 2, maxLength: 80 }, "Lagos"),
+    query("page", "One-based page number.", { type: "integer", minimum: 1, default: 1 }, 1),
+    query("limit", "Maximum records per page.", { type: "integer", minimum: 1, maximum: 100, default: 20 }, 20),
   ],
   "GET /events/recommended": [
     query("latitude", "Latitude; must be supplied with longitude.", { type: "number", minimum: -90, maximum: 90 }, 6.5244),
@@ -1530,6 +1615,10 @@ export const queryParameterContracts: Record<string, QueryParameterContract[]> =
 };
 
 export const successContracts: Record<string, SuccessContract> = {
+  "GET /locations/reverse": ok("State lookup complete.", {
+    state: "Lagos",
+    attribution: "Powered by Geoapify · © OpenStreetMap contributors",
+  }),
   "GET /locations/search": ok("Location suggestions loaded.", {
     results: [{
       id: "provider-result-id",
@@ -1561,7 +1650,8 @@ export const successContracts: Record<string, SuccessContract> = {
   "DELETE /users/me": ok("Account deleted"),
   "POST /users/{id}/reports": ok("Report submitted", { report: { ...report, targetType: "user" } }, 201),
 
-  "GET /users/me/communities": ok("My communities retrieved", { communities: [{ ...community, coverImageUrl: community.imageUrl, avatarImageUrl: community.imageUrl, memberCount: 8, viewerMembership: { role: "member", status: "active", joinedAt: createdAt, muted: false }, unreadCount: 2, lastActivityAt: createdAt }], pagination: { page: 1, limit: 20, total: 1, totalPages: 1 } }),
+  "GET /users/me/communities": ok("My communities retrieved", { communities: [{ ...community, coverImageUrl: community.imageUrl, avatarImageUrl: community.imageUrl, memberCount: 8, viewerMembership: { role: "member", status: "active", joinedAt: createdAt, muted: false, notificationLevel: "all" }, unreadCount: 2, lastActivityAt: createdAt }], pagination: { page: 1, limit: 20, total: 1, totalPages: 1 } }),
+  "GET /users/me/community-join-requests": ok("My community join requests retrieved", { joinRequests: [{ _id: id, communityId: { _id: secondId, name: "Private Builders", imageUrl: community.imageUrl, visibility: "private", membershipType: "free", membershipPriceKobo: 0, joinPolicy: "approval" }, requesterId: id, message: "Please let me join", status: "pending", createdAt }], pagination: { page: 1, limit: 20, total: 1, totalPages: 1 } }),
   "GET /communities/{id}/rules": ok("Community rules retrieved", { rules: { communityId: id, introduction: "Keep the community welcoming and useful.", rules: [{ _id: secondId, title: "Be respectful", description: "Treat every member with respect.", order: 0 }], consequences: ["Repeated violations may result in removal."], updatedAt: createdAt, updatedBy: secondUser } }),
   "PUT /communities/{id}/rules": ok("Community rules retrieved", { rules: { communityId: id, introduction: "Keep the community welcoming and useful.", rules: [], consequences: [], updatedAt: createdAt, updatedBy: user } }),
   "GET /communities/{id}/settings": ok("Community settings retrieved", { settings: { joinPolicy: "approval", messagePermission: "moderators", membersCanCreatePosts: true, membersCanInvite: false, showMemberList: true } }),
@@ -1570,7 +1660,11 @@ export const successContracts: Record<string, SuccessContract> = {
   "DELETE /communities/{id}/members/{userId}": ok("Community member removed", { removedUserId: secondId }),
   "PUT /communities/{id}/bans/{userId}": ok("Community member banned", { userId: secondId, status: "banned", reason: "Repeated harassment in community messages.", expiresAt: "2026-12-31T23:59:59.000Z" }),
   "DELETE /communities/{id}/bans/{userId}": ok("Community member unbanned", { userId: secondId, status: "removed" }),
-  "POST /communities/{id}/join-requests": ok("Community join request created", { joinRequest: { _id: id, communityId: secondId, requesterId: user, message: "I would like to join the community.", status: "pending", createdAt } }, 201),
+  "POST /communities/{id}/join-requests": { ...ok("Community join request created", { joinRequest: { _id: id, communityId: secondId, requesterId: user, message: "I would like to join the community.", status: "pending", createdAt } }, 201), examples: {
+    pending: { summary: "Approval required", value: { success: true, message: "Community join request created", data: { joinRequest: { _id: id, communityId: secondId, requesterId: user, message: "I would like to join the community.", status: "pending", createdAt } } } },
+    premiumAccess: { summary: "Approved access awaiting payment", value: { success: true, message: "Community membership checkout required", data: { joinRequest: { _id: id, communityId: secondId, requesterId: user, message: "I would like to join the community.", status: "approved", createdAt } } } },
+    directJoin: { summary: "Free direct join", value: { success: true, message: "Community joined", data: { membership: { role: "member", status: "active", joinedAt: createdAt, muted: false, notificationLevel: "all" } } } },
+  } },
   "GET /communities/{id}/join-requests": ok("Community join requests retrieved", { joinRequests: [], pagination: { page: 1, limit: 20, total: 0, totalPages: 1 } }),
   "PATCH /communities/{id}/join-requests/{requestId}": ok("Community join request reviewed", { joinRequest: { _id: id, status: "approved" }, member: { user: user, communityRole: "member", status: "active", joinedAt: createdAt } }),
   "DELETE /communities/{id}/join-requests/me": ok("Community join request cancelled", { joinRequestId: id, status: "cancelled" }),
@@ -1593,6 +1687,7 @@ export const successContracts: Record<string, SuccessContract> = {
   "DELETE /communities/{id}/posts/{postId}": ok("Community post deleted", { postId: id, deletedAt: createdAt }),
   "POST /communities/{id}/messages/{messageId}/reports": ok("Community message reported", { report: { _id: id, targetType: "community_message", targetId: secondId, status: "open", createdAt } }, 201),  "POST /communities/{id}/ownership-transfer": ok("Community ownership transferred", { communityId: id, previousOwnerId: id, newOwnerId: secondId, transferredAt: createdAt }),
   "GET /events": ok("Events retrieved", { events: [event], sort: "soonest", pagination: { page: 1, limit: 20, total: 1 } }),
+  "GET /events/discover": ok("Discovery events retrieved", { events: [event], section: "trending", pagination: { page: 1, limit: 20, total: 1 } }),
   "GET /events/recommended": ok("Personalized upcoming events retrieved", { events: [{ ...event, hasTicket: true, distanceKm: 4.8, recommendationScore: 0.91, recommendationReasons: ["You have a ticket", "Matches your interests"] }], locationUsed: { latitude: 6.5244, longitude: 3.3792 } }),
   "GET /events/created/me": ok("Created events retrieved", { events: [event] }),
   "GET /events/{id}": ok("Event retrieved", { event, ticketTypes: [ticketType] }),
@@ -1667,19 +1762,20 @@ export const successContracts: Record<string, SuccessContract> = {
   "POST /events/{id}/reports": ok("Report submitted", { report }, 201),
 
   "GET /communities": ok("Communities retrieved", { communities: [community], pagination: { page: 1, limit: 20, total: 1 } }),
-  "GET /communities/{id}": ok("Community retrieved", { community }),
-  "POST /communities": ok("Community created", { community }, 201),
+  "GET /communities/{id}": ok("Community retrieved", { community: { ...community, ownerId: { _id: secondId, firstName: "Ada", lastName: "Okafor", avatarUrl: "https://res.cloudinary.com/example/avatar.webp" } } }),
+  "POST /communities": ok("Community created", { community: { ...community, visibility: "private", membershipType: "free", membershipPriceKobo: 0, joinPolicy: "access_code" } }, 201),
+  "POST /communities/resolve-code": ok("Community found", { community: { id, name: "Private Builders", imageUrl: community.imageUrl, visibility: "private", joinPolicy: "access_code" } }),
   "PATCH /communities/{id}": ok("Community updated", { community: { ...community, membershipPriceKobo: 250000 } }),
   "POST /communities/{id}/members": ok("Community joined"),
   "POST /communities/{id}/membership-orders": ok("Community membership checkout initialized", { order: { orderNumber: "CCM-1784370000000-A1B2C3D4", communityId: id, grossAmountKobo: 200000, platformFeeKobo: 10000, ownerProceedsKobo: 190000, status: "pending" }, checkoutUrl: "https://checkout.paystack.com/example", accessCode: "example_access_code", publicKey: "pk_test_example", charge: { grossAmountKobo: 200000, platformFeeKobo: 10000, ownerProceedsKobo: 190000 } }, 201),
   "GET /communities/membership-orders/{orderNumber}/verify": ok("Community membership verified", { order: { orderNumber: "CCM-1784370000000-A1B2C3D4", communityId: community, status: "paid", paidAt: createdAt } }),
   "DELETE /communities/{id}/members/me": ok("Community left"),
-  "GET /communities/{id}/members": ok("Community members retrieved", { members: [user] }),
+  "GET /communities/{id}/members": ok("Community members retrieved", { members: [{ user: { _id: user._id, firstName: user.firstName, lastName: user.lastName, avatarUrl: user.avatarUrl, state: "Lagos", lga: "Ikeja" }, communityRole: "member", status: "active", joinedAt: createdAt }], pagination: { page: 1, limit: 20, total: 1, totalPages: 1 } }),
   "GET /communities/{id}/posts": ok("Community posts retrieved", { posts: [communityPost], pagination: { page: 1, limit: 20, total: 1 } }),
   "POST /communities/{id}/posts": ok("Community post created", { post: communityPost }, 201),
   "GET /communities/{id}/announcements": ok("Community announcements retrieved", { announcements: [communityAnnouncement], pagination: { page: 1, limit: 20, total: 1 } }),
   "POST /communities/{id}/announcements": ok("Community announcement created", { announcement: communityAnnouncement }, 201),
-  "GET /communities/{id}/messages": ok("Community messages retrieved", { messages: [communityMessage], pagination: { page: 1, limit: 20, total: 1 } }),
+  "GET /communities/{id}/messages": ok("Community messages retrieved", { messages: [communityMessage], pageInfo: { nextCursor: "MjAyNi0wNy0xOFQwOTozMDowMC4wMDBaOjY2NTBmMGM4YjlmMWMyZDNlNGE1YjZjNw", hasMore: true } }),
   "POST /communities/{id}/messages": ok("Community message sent", { message: communityMessage }, 201),
   "POST /communities/{id}/reports": ok("Report submitted", { report: { ...report, targetType: "community" } }, 201),
 
@@ -1697,6 +1793,7 @@ export const successContracts: Record<string, SuccessContract> = {
   "POST /chat/conversations/{id}/read": ok("Conversation marked as read"),
 
   "POST /ai/chat": ok("AI response generated", { sessionId: id, message: "Here are nearby technology events that match your interests." }),
+  "POST /ai/guest-chat": ok("AI response generated", { message: "You can explore upcoming events and buy tickets on Community Connect." }),
   "POST /ai/event-copy": ok("Event copy generated", { sessionId: id, message: "Lagos Tech Meetup 2026 â€” practical talks and meaningful networking for builders." }),
   "POST /ai/event-recommendations": ok("Personalized event recommendations generated", { events: [{ ...event, distanceKm: 4.8, recommendationScore: 0.91 }] }),
   "POST /ai/conversations/{id}/summary": ok("Conversation summarized", { sessionId: id, message: "The participants agreed to attend the meetup and meet at the entrance." }),

@@ -13,6 +13,8 @@ const testFiles = [
   "tests/location.test.ts",
   "tests/location-search.test.ts",
   "tests/event-moderation.test.ts",
+  "tests/event-discovery.test.ts",
+  "tests/web-ticket-callback.test.ts",
   "tests/request-body-log.test.ts",
 ];
 

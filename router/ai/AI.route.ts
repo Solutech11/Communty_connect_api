@@ -2,6 +2,7 @@
 import { z } from "zod";
 import {
   assistantChat,
+  guestAssistantChat,
   deleteAISession,
   generateEventCopy,
   listAISessions,
@@ -9,11 +10,27 @@ import {
   summarizeConversation,
 } from "../../Community_AI/AI.controller";
 import { authenticate } from "../../middleware/auth.middleware";
+import { guestAiRateLimiter } from "../../middleware/security.middleware";
 import { validate } from "../../middleware/validate.middleware";
 import { idParamsSchema, objectIdSchema } from "../../schemas/common.schemas";
 import { asyncHandler } from "../../utils/asyncHandler.utils";
 
 const router = Router();
+router.post(
+  "/guest-chat",
+  guestAiRateLimiter,
+  validate({
+    body: z.object({
+      message: z.string().trim().min(1).max(1000),
+      state: z.string().trim().min(2).max(80).optional(),
+      history: z.array(z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().trim().min(1).max(1000),
+      }).strict()).max(6).optional(),
+    }).strict(),
+  }),
+  asyncHandler(guestAssistantChat),
+);
 router.use(authenticate);
 router.post(
   "/chat",

@@ -99,6 +99,18 @@ export const aiRateLimiter = rateLimit({
   },
 });
 
+export const guestAiRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  store: rateLimitStore("rl:guest-ai:"),
+  keyGenerator: (request) => `ip:${ipKeyGenerator(request.ip || "unknown")}`,
+  handler: (_request, _response, next) => {
+    next(new AppError(429, "Guest AI limit reached. Try again later.", "RATE_LIMIT_EXCEEDED"));
+  },
+});
+
 export const locationSearchRateLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 30,
@@ -108,6 +120,18 @@ export const locationSearchRateLimiter = rateLimit({
   keyGenerator: (request) => `user:${request.auth?.id || ipKeyGenerator(request.ip || "unknown")}`,
   handler: (_request, _response, next) => {
     next(new AppError(429, "Too many location searches. Try again later.", "RATE_LIMIT_EXCEEDED"));
+  },
+});
+
+export const communityCodeRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  store: rateLimitStore("rl:community-code:"),
+  keyGenerator: (request) => `user:${request.auth?.id || ipKeyGenerator(request.ip || "unknown")}`,
+  handler: (_request, _response, next) => {
+    next(new AppError(429, "Too many community code attempts. Try again later.", "RATE_LIMIT_EXCEEDED"));
   },
 });
 

@@ -15,7 +15,7 @@ import {
   updateProfileAvatar,
 } from "../../Controller/user.controller";
 import { createTargetReport } from "../../Controller/report.controller";
-import { listMyCommunities } from "../../Controller/communityManagement.controller";
+import { listMyCommunities, listMyCommunityJoinRequests } from "../../Controller/communityManagement.controller";
 import { authenticate } from "../../middleware/auth.middleware";
 import { imageUpload } from "../../middleware/imageUpload.middleware";
 import { validate } from "../../middleware/validate.middleware";
@@ -49,6 +49,14 @@ router.get(
     }).strict(),
   }),
   asyncHandler(listMyCommunities),
+);
+router.get(
+  "/me/community-join-requests",
+  validate({ query: z.object({
+    page: z.coerce.number().int().min(1).max(10_000).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+  }).strict() }),
+  asyncHandler(listMyCommunityJoinRequests),
 );
 router.post(
   "/:id/reports",

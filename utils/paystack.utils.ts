@@ -109,6 +109,7 @@ export const initializePaystackTransaction = async (input: {
   amountKobo: number;
   reference: string;
   metadata: Record<string, unknown>;
+  callbackUrl?: string;
 }): Promise<PaystackInitializedTransaction> => {
   return runPaystackRequest("initialize_transaction", () =>
     paystack.post("/transaction/initialize", {
@@ -117,7 +118,7 @@ export const initializePaystackTransaction = async (input: {
       amount: input.amountKobo,
       currency: env.PAYSTACK_CURRENCY,
       reference: input.reference,
-      callback_url: env.PAYSTACK_CALLBACK_URL,
+      callback_url: input.callbackUrl || env.PAYSTACK_CALLBACK_URL,
       metadata: input.metadata,
     }),
   );

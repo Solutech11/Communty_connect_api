@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import axios from "axios";
 import "./test-env";
-import { locationSearchQuerySchema } from "../schemas/location.schemas";
-import { mapGeoapifyResult, searchGeoapifyLocations } from "../utils/geoapify.utils";
+import { locationReverseQuerySchema, locationSearchQuerySchema } from "../schemas/location.schemas";
+import { mapGeoapifyResult, reverseGeoapifyState, searchGeoapifyLocations } from "../utils/geoapify.utils";
 import { openApiDocument } from "../Config/swagger";
 
 test("location query trims text, caps limit, and requires a complete valid coordinate pair", () => {
@@ -37,6 +37,21 @@ test("Geoapify mapping preserves available fields and leaves absent address part
   assert.equal(result?.state, null);
   assert.equal(result?.localArea, null);
   assert.equal(mapGeoapifyResult({ formatted: "Bad", lat: 91, lon: 3 }), null);
+});
+
+test("reverse lookup validates coordinates, sends them to Geoapify, and returns the state", async () => {
+  assert.equal(locationReverseQuerySchema.safeParse({ latitude: "91", longitude: "3" }).success, false);
+  assert.equal(locationReverseQuerySchema.safeParse({ latitude: "6.5" }).success, false);
+  const get = mock.method(axios, "get", async (url: string, config?: { params?: Record<string, string | number> }) => {
+    assert.equal(url, "https://api.geoapify.com/v1/geocode/reverse");
+    assert.equal(config?.params?.lat, 6.5244);
+    assert.equal(config?.params?.lon, 3.3792);
+    assert.equal(config?.params?.apiKey, "test-key");
+    return { data: { results: [{ state: "Lagos" }] } };
+  });
+  try {
+    assert.equal(await reverseGeoapifyState(locationReverseQuerySchema.parse({ latitude: "6.5244", longitude: "3.3792" })), "Lagos");
+  } finally { get.mock.restore(); }
 });
 
 test("provider request keeps the key server-side and uses longitude,latitude proximity", async () => {

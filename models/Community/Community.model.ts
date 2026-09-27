@@ -32,6 +32,7 @@ const communitySchema = new Schema(
       default: "open",
     },
     accessCodeHash: { type: String, select: false },
+    accessCodeLookupHash: { type: String, select: false },
     messagePermission: { type: String, enum: ["everyone", "moderators"], default: "everyone" },
     membersCanCreatePosts: { type: Boolean, default: true },
     membersCanInvite: { type: Boolean, default: false },
@@ -51,6 +52,7 @@ const communitySchema = new Schema(
 
 communitySchema.index({ name: "text", description: "text" });
 communitySchema.index({ visibility: 1, lastActivityAt: -1 });
+communitySchema.index({ accessCodeLookupHash: 1 }, { unique: true, partialFilterExpression: { accessCodeLookupHash: { $type: "string" } } });
 communitySchema.pre("validate", function validateMembershipPrice() {
   if (this.membershipType === "premium" && this.membershipPriceKobo <= 0) {
     this.invalidate("membershipPriceKobo", "Premium communities require a positive membership price");
@@ -58,6 +60,13 @@ communitySchema.pre("validate", function validateMembershipPrice() {
 
   if (this.membershipType === "free") {
     this.membershipPriceKobo = 0;
+  }
+  if (this.membershipType === "premium" && (this.visibility !== "public" || this.joinPolicy !== "open")) {
+    this.invalidate("membershipType", "Premium communities must be public with open joining");
+  }
+  if (this.joinPolicy === "access_code" && !this.accessCodeHash
+    && (this.isNew || this.isModified("joinPolicy") || this.isModified("accessCodeHash"))) {
+    this.invalidate("accessCodeHash", "An access code is required for code joining");
   }
 });
 

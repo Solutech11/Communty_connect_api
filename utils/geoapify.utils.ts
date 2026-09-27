@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import axios from "axios";
 import { env } from "../Config/env";
-import type { LocationSearchQuery } from "../schemas/location.schemas";
+import type { LocationReverseQuery, LocationSearchQuery } from "../schemas/location.schemas";
 import { AppError } from "./AppError";
 import { logger } from "./logger.utils";
 
@@ -90,5 +90,39 @@ export const searchGeoapifyLocations = async (
     }, "Geoapify location search failed");
     if (error instanceof AppError) throw error;
     throw new AppError(502, "Location search is temporarily unavailable", "LOCATION_PROVIDER_UNAVAILABLE");
+  }
+};
+
+export const reverseGeoapifyState = async (query: LocationReverseQuery): Promise<string | null> => {
+  if (!env.GEOAPIFY_API_KEY) {
+    throw new AppError(503, "Location lookup is unavailable", "LOCATION_SEARCH_UNAVAILABLE");
+  }
+  try {
+    const response = await axios.get<unknown>("https://api.geoapify.com/v1/geocode/reverse", {
+      params: {
+        lat: query.latitude,
+        lon: query.longitude,
+        format: "json",
+        apiKey: env.GEOAPIFY_API_KEY,
+      },
+      timeout: 5_000,
+      maxRedirects: 0,
+      headers: { Accept: "application/json" },
+    });
+    const payload = response.data;
+    if (!payload || typeof payload !== "object" || !Array.isArray((payload as { results?: unknown }).results)) {
+      throw new AppError(502, "Location lookup is temporarily unavailable", "LOCATION_PROVIDER_INVALID_RESPONSE");
+    }
+    const first = (payload as { results: unknown[] }).results[0];
+    if (!first || typeof first !== "object" || Array.isArray(first)) return null;
+    return stringField((first as Record<string, unknown>).state);
+  } catch (error) {
+    logger.warn({
+      provider: "geoapify",
+      operation: "reverse",
+      providerStatus: axios.isAxiosError(error) ? error.response?.status : undefined,
+    }, "Geoapify reverse lookup failed");
+    if (error instanceof AppError) throw error;
+    throw new AppError(502, "Location lookup is temporarily unavailable", "LOCATION_PROVIDER_UNAVAILABLE");
   }
 };
