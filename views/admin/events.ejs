@@ -1,0 +1,31 @@
+<%- include("partials/shell-top", {
+  title,
+  csrfToken,
+  permissions,
+  activeTab,
+  sectionLabel: "Event operations",
+  heading: "Events",
+  subtitle: "Search every listing, check sales, and open the complete ticket record.",
+  message,
+}) %>
+
+<section class="stats-grid stats-grid-compact" aria-label="Event moderation counts">
+  <article class="stat-card"><span>Awaiting review</span><strong><%= counts.pending_approval || 0 %></strong><small>New event submissions</small></article>
+  <article class="stat-card"><span>Published</span><strong><%= counts.published || 0 %></strong><small>Visible to members</small></article>
+  <article class="stat-card"><span>Deactivated</span><strong><%= counts.deactivated || 0 %></strong><small>Removed from discovery</small></article>
+  <article class="stat-card"><span>All events</span><strong><%= Object.values(counts).reduce((sum, count) => sum + count, 0).toLocaleString("en-NG") %></strong><small>Across event statuses</small></article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading panel-heading-filter"><div><p class="eyebrow">Listing register</p><h2>Find an event</h2><p>Open any event to review its complete listing, ticket types, and purchases.</p></div>
+    <form method="get" action="/admin/events" class="filter-form"><label>Search<input name="search" value="<%= search %>" maxlength="80" placeholder="Event title"></label><label>Status<select name="status"><% [["pending_approval","Needs review"],["all","All events"],["published","Published"],["deactivated","Deactivated"],["rejected","Rejected"],["cancelled","Cancelled"],["completed","Completed"],["draft","Draft"]].forEach(([value,label]) => { %><option value="<%= value %>" <%= status === value ? "selected" : "" %>><%= label %></option><% }) %></select></label><button class="button button-primary" type="submit">Apply filters</button></form>
+  </div>
+  <div class="table-wrap"><table><thead><tr><th>Event</th><th>Organizer</th><th>Date</th><th>Paid tickets</th><th>Status</th><th>Details</th></tr></thead><tbody>
+    <% events.forEach((event) => { const organizer = event.creatorId || {}; const sales = salesByEvent.get(String(event._id)) || {}; %>
+      <tr><td><div class="event-cell"><% if (event.coverImageUrl) { %><img src="<%= event.coverImageUrl %>" alt="" loading="lazy"><% } else { %><span class="event-placeholder">✦</span><% } %><div><strong><%= event.title %></strong><small><%= event.activityType %> · <%= event.state %>, <%= event.lga %></small></div></div></td><td><%= organizer.firstName || "Unknown" %> <%= organizer.lastName || "" %><small><%= organizer.email || "" %></small></td><td><%= new Date(event.startsAt).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" }) %><small><%= new Date(event.startsAt).toLocaleTimeString("en-NG", { hour: "numeric", minute: "2-digit" }) %></small></td><td><strong><%= sales.tickets || 0 %></strong><small><%= sales.orders || 0 %> orders · <%= formatNaira(sales.grossKobo || 0) %></small></td><td><span class="status status-<%= event.status %>"><%= event.status.replaceAll("_", " ") %></span></td><td><a class="button button-soft button-small" href="/admin/events/<%= event._id %>">View details <span aria-hidden="true">↗</span></a></td></tr>
+    <% }) %>
+    <% if (!events.length) { %><tr><td colspan="6" class="empty">No events match these filters.</td></tr><% } %>
+  </tbody></table></div>
+  <div class="pagination"><span>Page <%= page %> of <%= pageCount %> · <%= total.toLocaleString("en-NG") %> events</span><div><% if (page > 1) { %><a class="button button-soft button-small" href="/admin/events?page=<%= page - 1 %>&amp;status=<%= status %>&amp;search=<%= encodeURIComponent(search) %>">Previous</a><% } %><% if (page < pageCount) { %><a class="button button-soft button-small" href="/admin/events?page=<%= page + 1 %>&amp;status=<%= status %>&amp;search=<%= encodeURIComponent(search) %>">Next</a><% } %></div></div>
+</section>
+<%- include("partials/shell-bottom") %>

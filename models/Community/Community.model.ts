@@ -24,6 +24,12 @@ const communitySchema = new Schema(
     state: { type: String, index: true },
     lga: { type: String, index: true },
     visibility: { type: String, enum: ["public", "private"], default: "public" },
+    isActive: { type: Boolean, default: true, index: true },
+    adminDeactivatedAt: { type: Date, select: false },
+    adminDeactivatedBy: { type: Schema.Types.ObjectId, ref: "User", select: false },
+    adminDeactivationReason: { type: String, maxlength: 300, select: false },
+    adminActivatedAt: { type: Date, select: false },
+    adminActivatedBy: { type: Schema.Types.ObjectId, ref: "User", select: false },
     membershipType: { type: String, enum: ["free", "premium"], default: "free", index: true },
     membershipPriceKobo: { type: Number, default: 0, min: 0 },
     joinPolicy: {

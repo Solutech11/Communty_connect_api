@@ -277,18 +277,26 @@ See [matching, consent, deployment and integration tests](docs/roommate-matching
 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
-| GET | `/wallet` | Yes | Get wallet balances in kobo |
+| GET | `/wallet` | Yes | Balances, NGN 1,000 payout minimum, midnight countdown, status, and masked payout bank |
 | GET | `/wallet/transactions` | Yes | Filter owned ledger entries |
 | GET | `/wallet/transactions/{id}` | Yes | Get one owned transaction |
-| POST | `/wallet/topups` | Yes + key | Initialize requested wallet credit plus deposit charge |
-| GET | `/wallet/topups/{reference}/verify` | Yes | Verify amount/status and credit once |
+| GET | `/wallet/topups/{reference}/verify` | Yes | Reconcile a top-up initialized before manual funding was disabled |
 | GET | `/wallet/banks` | Yes | Cached active Paystack bank list |
 | GET | `/wallet/bank-accounts` | Yes | List masked owned accounts |
+| POST | `/wallet/bank-accounts/resolve` | Yes | Preview verified account name and masked digits before saving (10/user/minute) |
 | POST | `/wallet/bank-accounts` | Yes | Resolve, create recipient, encrypt and save account |
 | DELETE | `/wallet/bank-accounts/{id}` | Yes | Deactivate owned account |
-| POST | `/wallet/transfers` | Yes + key | Atomic internal debit/credit transfer |
-| POST | `/wallet/withdrawals` | Yes + key | Reserve funds, deduct withdrawal charge, and initiate net payout |
-| POST | `/wallet/withdrawals/{reference}/finalize` | Yes | Submit Paystack transfer OTP when required |
+| POST | `/wallet/withdrawals/{reference}/finalize` | Yes | Finalize an existing legacy withdrawal requiring OTP |
+
+Wallets receive earnings from verified ticket and premium-community payments and other server-authorized credits. There are no manual top-up, withdrawal, or internal transfer endpoints. Automatic payouts start every day at **00:00 Africa/Lagos (23:00 UTC)**; this is a shared daily schedule, not 24 hours after each receipt.
+
+The wallet response includes `payout.serverTime` and `payout.nextPayoutAt` for the mobile countdown, a masked `payout.bankAccount`, and `payout.status` (`scheduled`, `processing`, `below_minimum`, `bank_required`, `empty`, or `paused`). The default active bank is used, falling back to the oldest active bank. Without a bank, funds stay in the wallet and a daily email asks the user to open My Wallet and link an account. Linking after that day's run makes the balance eligible at the following midnight.
+
+Each run reserves the full available balance in integer kobo and creates an audit transaction and durable queue entry in one Mongo transaction. Automatic payouts require an available balance of at least **NGN 1,000 (100,000 kobo)** and have no platform withdrawal fee. Smaller balances stay in the wallet and accumulate until they qualify for a future midnight run. The response exposes `payout.minimumAmountKobo` and `below_minimum` status when a linked wallet is below the threshold. Provider transfer fees are paid from the platform's Paystack balance. Paystack confirmation clears reserved funds; terminal failure restores them, and a later reversal after success also restores them exactly once. New earnings received while a payout is processing wait for the next run. Frozen wallets are not paid.
+
+Work drains in batches of at most 100 transfers with at least five seconds between bulk requests across replicas, five concurrent database operations per batch, indexed due-date queries, and separately bounded reconciliation/reminder workers. Renewable Redis leases coordinate workers; wallet due dates, unique user/day records, and stable provider references survive restarts. Ambiguous submissions keep funds reserved and are verified before retrying the same reference. Missing webhooks are reconciled hourly. Mail failures retry from a durable outbox with backoff; email provider acceptance followed by a process crash can cause a repeated reminder.
+
+Startup creates the payout queue/reminder indexes and the wallet/bank lookup indexes explicitly in production. Legacy wallets missing a payout due date are scheduled for the next midnight on rollout. After downtime, overdue balances resume in bounded batches. The server must stay running at midnight; bulk submission starts then and bank settlement follows provider processing.
 
 ### Uploads and Webhooks
 
@@ -339,12 +347,16 @@ is supported for native clients; an explicit origin must pass the allowlist.
 ## Admin Portal and Platform Charges
 
 - Visit `/admin/login` and sign in with an active user whose role is `admin`. The `BOOTSTRAP_ADMIN_EMAIL` registration flow remains the only public bootstrap path.
-- The portal is sectioned into moderation, members, administrator team, and revenue areas. Administrators with `admins:manage` can create active verified administrator accounts; their passwords are hashed before storage.
+- The branded portal uses page navigation for Overview, Events, Members, Communities, Reports, Admin team, and Revenue. Drawer links open dedicated workspaces instead of scrolling within one page.
+- Event workspaces show full listing and moderation details, ticket types, ticket sales, and a paginated order ledger with purchaser, quantity, payment split, payment status, and check-in information.
+- Community workspaces show ownership, membership, premium orders, and recent activity. Administrators with `communities:moderate` can activate or deactivate a community; deactivated communities leave discovery and protected member features, and their active community sockets are removed.
+- The Reports inbox supports event, user, community, and community-message reports. Administrators can move reports into review, resolve them, or dismiss them with a recorded note.
+- Administrators with `admins:manage` can create active verified administrator accounts; their passwords are hashed before storage.
 - Administrators with `users:moderate` can block active non-admin accounts. Blocking revokes refresh sessions immediately; unblocking restores the member account. Administrator accounts cannot be blocked through the portal.
 - Admin browser sessions are hashed in MongoDB, expire automatically, bind to IP and user agent, use secure HttpOnly SameSite cookies, and require CSRF tokens for every action.
 - `POST /events/{id}/publish` runs immediate Groq moderation over event details, ticket-price consistency, and the authenticated Cloudinary cover image. Safe events are published automatically. Declined events retain category-specific reasons, notify the organizer in-app and by email, and can be corrected and resubmitted. If the provider is unavailable, the event remains `pending_approval` for manual portal review. Published events can be deactivated with a recorded reason.
 - Platform percentages are configured as integer basis points: `DEPOSIT_CHARGE_BPS`, `WITHDRAWAL_CHARGE_BPS`, `TICKET_CHARGE_BPS`, and `COMMUNITY_CHARGE_BPS`.
-- Deposit fees are added to the desired wallet credit; withdrawal fees are deducted from the requested payout; ticket fees are added as a service fee; premium-community fees are retained from owner proceeds.
+- Ticket fees are added as a service fee; premium-community fees are retained from owner proceeds. Deposit and withdrawal rates apply only to legacy transactions; daily automatic payouts remit the full wallet balance.
 - Earnings are recognized only inside the same Mongo transaction that completes the verified payment or successful withdrawal. The immutable source reference prevents duplicate earnings.
 
 ## Paystack Production Checklist
@@ -352,11 +364,11 @@ is supported for native clients; an explicit origin must pass the allowlist.
 1. Configure `POST https://your-api.example.com/api/v1/webhooks/paystack` in Paystack.
 2. Keep the Paystack secret only on the backend. The public key may be returned to the app for checkout.
 3. Leave raw-body capture enabled. The webhook compares `x-paystack-signature` with HMAC-SHA512 in constant time.
-4. Top-ups are credited only after signed `charge.success` or an authenticated server-to-server verification. The Paystack amount must equal the initialized wallet credit plus platform deposit charge, or the charged amount less Paystack's reported processing fee must equal it when Paystack's "Pass fees to customers" setting is enabled.
+4. New manual top-ups are disabled. Existing top-ups still require a signed charge.success webhook or server-side verification with the original amount and processing-fee checks.
    The same settlement rule applies to paid ticket and premium community orders before their inventory or memberships are finalized.
-5. Confirmed wallet top-ups, ticket purchases, premium memberships, successful withdrawals, and internal wallet transfers send transaction emails to the affected users. Mail delivery is best-effort and does not reverse a committed financial transaction.
-6. Withdrawals use stored Paystack recipient codes, unique references, reserved wallet funds, and final `transfer.success`, `transfer.failed`, or `transfer.reversed` webhooks.
-7. If Paystack transfer confirmation is enabled, call the finalize route with the user's OTP. Never log the OTP.
+5. Verified ticket purchases, premium memberships, and successful bank payouts send receipt emails. Users with pending funds and no linked bank receive a reminder at every daily payout run.
+6. Bulk payouts use stored recipients, unique references, reserved wallet funds, signed transfer.success/failed/reversed webhooks, and provider verification for uncertain responses. Register the webhook URL in the Paystack dashboard.
+7. Disable transfer OTP confirmation in the Paystack dashboard for automatic bulk payouts. Ensure the Paystack balance covers payout totals and transfer fees. URL approval, if enabled, must handle all transfers promptly.
 
 ## Event Recommendation Algorithm
 

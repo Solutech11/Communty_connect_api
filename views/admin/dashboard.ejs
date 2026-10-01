@@ -1,207 +1,77 @@
-﻿<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title><%= title %></title>
-  <link rel="stylesheet" href="/admin/assets/admin.css">
-</head>
-<body>
-  <div class="admin-layout">
-    <aside class="sidebar">
-      <a class="brand" href="/admin" aria-label="Community Connect Admin home">
-        <span class="brand-mark">CC</span>
-        <span><strong>Community</strong><small>Admin console</small></span>
-      </a>
-      <nav class="side-nav" aria-label="Admin sections">
-        <a class="active" href="#overview"><span>01</span> Overview</a>
-        <a href="#moderation"><span>02</span> Event moderation</a>
-        <a href="#people"><span>03</span> Members</a>
-        <a href="#administrators"><span>04</span> Administrators</a>
-        <a href="#finance"><span>05</span> Revenue</a>
-      </nav>
-      <div class="sidebar-note">
-        <span class="eyebrow">Portal protection</span>
-        <p>Admin actions require an active session and CSRF verification.</p>
-      </div>
-      <form method="post" action="/admin/logout" class="sign-out-form">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <button class="button button-ghost" type="submit">Sign out</button>
-      </form>
-    </aside>
+<% const currentTab = typeof activeTab === "undefined" ? "overview" : activeTab || "overview"; %>
+<% const pageTab = typeof tabDetails === "undefined" || !tabDetails ? { label: "Community Connect", heading: "Operations overview", subtitle: "Platform activity and the work that needs attention." } : tabDetails; %>
+<%- include("partials/shell-top", {
+  title,
+  csrfToken,
+  permissions,
+  activeTab: currentTab,
+  sectionLabel: pageTab.label,
+  heading: pageTab.heading,
+  subtitle: pageTab.subtitle,
+  message,
+}) %>
 
-    <main class="main-content">
-      <header class="page-header" id="overview">
-        <div>
-          <p class="eyebrow">Community Connect</p>
-          <h1>Operations centre</h1>
-          <p class="page-subtitle">Moderate activity, manage members, and monitor platform performance.</p>
-        </div>
-        <div class="header-chip"><span class="signal-dot"></span> Secure admin session</div>
-      </header>
+<% if (currentTab === "overview") { %>
+  <section class="stats-grid" aria-label="Platform summary">
+    <article class="stat-card"><span>Total members</span><strong><%= stats.userCount.toLocaleString("en-NG") %></strong><small>Community Connect accounts</small></article>
+    <article class="stat-card"><span>Member restrictions</span><strong><%= stats.suspendedUserCount.toLocaleString("en-NG") %></strong><small>Accounts currently blocked</small></article>
+    <article class="stat-card"><span>Events to review</span><strong><%= stats.pendingEventCount.toLocaleString("en-NG") %></strong><small><%= stats.publishedEventCount.toLocaleString("en-NG") %> published events</small></article>
+    <article class="stat-card stat-accent"><span>Platform earnings</span><strong><%= formatNaira(stats.totalEarningsKobo) %></strong><small>Verified completed fees</small></article>
+  </section>
+  <section class="welcome-panel">
+    <div><p class="eyebrow eyebrow-light">Your operations at a glance</p><h2>Keep the community moving.</h2><p>Open a workspace to review activity, support members, and manage the events and communities they care about.</p></div>
+    <div class="quick-links">
+      <% if (permissions.includes("events:moderate")) { %><a class="button button-light" href="/admin/events">Review events <span>↗</span></a><% } %>
+      <% if (permissions.includes("communities:moderate")) { %><a class="button button-light" href="/admin/communities">Explore communities <span>↗</span></a><% } %>
+      <% if (permissions.includes("reports:moderate")) { %><a class="button button-light" href="/admin/reports">Open report queue <span>↗</span></a><% } %>
+    </div>
+  </section>
+<% } %>
 
-      <% if (message) { %><div class="alert alert-success"><span>✓</span><%= message %></div><% } %>
-
-      <section class="stats-grid" aria-label="Platform summary">
-        <article class="stat-card"><span>Total members</span><strong><%= stats.userCount %></strong><small>All platform accounts</small></article>
-        <article class="stat-card"><span>Blocked members</span><strong><%= stats.suspendedUserCount %></strong><small>Restricted from sign-in</small></article>
-        <article class="stat-card"><span>Review queue</span><strong><%= stats.pendingEventCount %></strong><small>Events awaiting decision</small></article>
-        <article class="stat-card stat-accent"><span>Platform earnings</span><strong><%= formatNaira(stats.totalEarningsKobo) %></strong><small>Completed platform fees</small></article>
-      </section>
-
-      <section class="panel" id="moderation">
-        <div class="panel-heading">
-          <div><p class="eyebrow">Moderation desk</p><h2>Event listings</h2><p>Review the latest community events before they reach members.</p></div>
-          <span class="count-pill"><%= stats.pendingEventCount %> awaiting review</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Event</th><th>Host</th><th>Schedule</th><th>Status</th><th>Decision</th></tr></thead>
-            <tbody>
-            <% events.forEach((event) => { const creator = event.creatorId || {}; %>
-              <tr>
-                <td><strong><%= event.title %></strong><small><%= event.state %>, <%= event.lga %></small></td>
-                <td><%= creator.firstName || "Unknown" %> <%= creator.lastName || "" %><small><%= creator.email || "" %></small></td>
-                <td><%= new Date(event.startsAt).toLocaleString("en-NG") %></td>
-                <td><span class="status status-<%= event.status %>"><%= event.status.replaceAll("_", " ") %></span></td>
-                <td>
-                  <% if (event.status === "pending_approval") { %>
-                    <form method="post" action="/admin/events/<%= event._id %>/approve">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <button class="button button-primary button-small" type="submit">Approve event</button>
-                    </form>
-                  <% } else if (event.status === "published") { %>
-                    <form method="post" action="/admin/events/<%= event._id %>/deactivate" class="inline-form">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <input name="reason" required minlength="5" maxlength="300" placeholder="Why is this being deactivated?">
-                      <button class="button button-danger button-small" type="submit">Deactivate</button>
-                    </form>
-                  <% } else { %><span class="muted">No action available</span><% } %>
-                </td>
-              </tr>
-            <% }) %>
-            <% if (!events.length) { %><tr><td colspan="5" class="empty">No events found.</td></tr><% } %>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel" id="people">
-        <div class="panel-heading">
-          <div><p class="eyebrow">Member controls</p><h2>Member accounts</h2><p>Blocking immediately revokes all active refresh sessions. Administrator accounts are protected from this control.</p></div>
-          <span class="count-pill"><%= users.length %> recent accounts</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th>Account control</th></tr></thead>
-            <tbody>
-            <% users.forEach((user) => { %>
-              <tr>
-                <td><strong><%= user.firstName %> <%= user.lastName %></strong><small><%= user.email %></small></td>
-                <td><span class="role-tag"><%= user.role %></span></td>
-                <td><span class="status status-<%= user.status %>"><%= user.status.replaceAll("_", " ") %></span></td>
-                <td><%= new Date(user.createdAt).toLocaleDateString("en-NG") %></td>
-                <td>
-                  <% if (permissions.includes("users:moderate") && user.role !== "admin" && user.status === "active") { %>
-                    <form method="post" action="/admin/users/<%= user._id %>/block" onsubmit="return confirm('Block this member and revoke their active sessions?');">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <button class="button button-danger button-small" type="submit">Block member</button>
-                    </form>
-                  <% } else if (permissions.includes("users:moderate") && user.role !== "admin" && user.status === "suspended") { %>
-                    <form method="post" action="/admin/users/<%= user._id %>/unblock" onsubmit="return confirm('Restore this member account?');">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <button class="button button-primary button-small" type="submit">Unblock member</button>
-                    </form>
-                  <% } else if (user.role === "admin") { %><span class="muted">Block member unavailable ? administrator protected</span><% } else { %><span class="muted">No action available</span><% } %>
-                </td>
-              </tr>
-            <% }) %>
-            <% if (!users.length) { %><tr><td colspan="5" class="empty">No user accounts found.</td></tr><% } %>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="dual-section" id="administrators">
-        <article class="panel admin-create-panel">
-          <div class="panel-heading compact-heading">
-            <div><p class="eyebrow">Team access</p><h2>Add administrator</h2><p>New administrators are active, verified, and receive full portal permissions.</p></div>
-          </div>
-          <% if (permissions.includes("admins:manage")) { %>
-            <form method="post" action="/admin/admins" class="form-grid">
-              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <label>First name<input name="firstName" required minlength="2" maxlength="60" autocomplete="given-name"></label>
-              <label>Last name<input name="lastName" required minlength="2" maxlength="60" autocomplete="family-name"></label>
-              <label class="full-width">Email address<input type="email" name="email" required maxlength="254" autocomplete="email"></label>
-              <label class="full-width">Temporary password<input type="password" name="password" required minlength="6" maxlength="128" autocomplete="new-password"></label>
-              <p class="form-hint full-width">Use at least one uppercase letter, lowercase letter, number, and symbol.</p>
-              <button class="button button-primary full-width" type="submit">Create administrator</button>
-            </form>
-          <% } else { %><p class="empty">You do not have permission to manage administrators.</p><% } %>
-        </article>
-
-        <article class="panel admin-directory">
-          <div class="panel-heading compact-heading"><div><p class="eyebrow">Access directory</p><h2>Administrator team</h2></div><span class="count-pill"><%= admins.length %> active records</span></div>
-          <div class="directory-list">
-            <% admins.forEach((admin) => { const adminUser = admin.userId || {}; %>
-              <div class="directory-item">
-                <span class="avatar"><%= (adminUser.firstName || "A").charAt(0) %><%= (adminUser.lastName || "").charAt(0) %></span>
-                <div><strong><%= adminUser.firstName || "Unknown" %> <%= adminUser.lastName || "" %></strong><small><%= adminUser.email || "Account unavailable" %></small></div>
-                <span class="status status-<%= admin.active ? "active" : "suspended" %>"><%= admin.active ? "active" : "inactive" %></span>
-              </div>
-            <% }) %>
-            <% if (!admins.length) { %><p class="empty">No administrator records found.</p><% } %>
-          </div>
-        </article>
-      </section>
-
-      <section class="panel" id="finance">
-        <div class="panel-heading">
-          <div><p class="eyebrow">Revenue desk</p><h2>Charge earnings</h2><p>Completed fees recognized through verified platform transactions.</p></div>
-        </div>
-        <div class="breakdown-grid">
-          <% earningBreakdown.forEach((item) => { %>
-            <article class="mini-card"><span><%= item._id.replaceAll("_", " ") %></span><strong><%= formatNaira(item.totalKobo) %></strong><small><%= item.count %> charges</small></article>
-          <% }) %>
-          <% if (!earningBreakdown.length) { %><p class="empty">No completed charges yet.</p><% } %>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Source</th><th>Gross</th><th>Platform fee</th><th>Net/proceeds</th><th>Earned</th></tr></thead>
-            <tbody>
-            <% recentEarnings.forEach((earning) => { %>
-              <tr>
-                <td><strong><%= earning.sourceType.replaceAll("_", " ") %></strong><small><%= earning.sourceReference %></small></td>
-                <td><%= formatNaira(earning.grossAmountKobo) %></td>
-                <td class="money-positive"><%= formatNaira(earning.feeAmountKobo) %></td>
-                <td><%= formatNaira(earning.netAmountKobo) %></td>
-                <td><%= new Date(earning.earnedAt).toLocaleString("en-NG") %></td>
-              </tr>
-            <% }) %>
-            <% if (!recentEarnings.length) { %><tr><td colspan="5" class="empty">No earnings recorded.</td></tr><% } %>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </main>
+<section class="section-view <%= currentTab === 'moderation' ? 'is-current' : '' %>" <%= currentTab === 'moderation' ? '' : 'hidden' %>>
+  <div class="panel">
+    <div class="panel-heading"><div><p class="eyebrow">Event workspace</p><h2>Event listings</h2><p>Review details, ticket sales, and moderation history for each event.</p></div><span class="count-pill"><%= stats.pendingEventCount %> awaiting review</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Event</th><th>Host</th><th>Schedule</th><th>Status</th><th>Review</th></tr></thead><tbody>
+      <% events.forEach((event) => { const creator = event.creatorId || {}; %>
+        <tr><td><strong><%= event.title %></strong><small><%= event.state %>, <%= event.lga %></small></td><td><%= creator.firstName || "Unknown" %> <%= creator.lastName || "" %><small><%= creator.email || "" %></small></td><td><%= new Date(event.startsAt).toLocaleString("en-NG") %></td><td><span class="status status-<%= event.status %>"><%= event.status.replaceAll("_", " ") %></span></td><td class="action-cell"><a class="button button-soft button-small" href="/admin/events/<%= event._id %>">Full details</a>
+          <% if (event.status === "pending_approval") { %><form method="post" action="/admin/events/<%= event._id %>/approve"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="button button-primary button-small" type="submit">Approve</button></form><% } %>
+        </td></tr>
+      <% }) %>
+      <% if (!events.length) { %><tr><td colspan="5" class="empty">No events found.</td></tr><% } %>
+    </tbody></table></div>
   </div>
+</section>
 
-<script>
-  const sectionLinks = [...document.querySelectorAll('.side-nav a[href^="#"]')];
-  const sectionTargets = sectionLinks
-    .map((link) => document.querySelector(link.getAttribute('href')))
-    .filter(Boolean);
-  const sectionObserver = new IntersectionObserver((entries) => {
-    const visible = entries.find((entry) => entry.isIntersecting);
-    if (!visible) return;
-    sectionLinks.forEach((link) => {
-      const active = link.getAttribute('href') === '#' + visible.target.id;
-      link.classList.toggle('active', active);
-      if (active) link.setAttribute('aria-current', 'page');
-      else link.removeAttribute('aria-current');
-    });
-  }, { rootMargin: '-18% 0px -68% 0px', threshold: 0 });
-  sectionTargets.forEach((section) => sectionObserver.observe(section));
-</script>
-</body>
-</html>
+<section class="section-view <%= currentTab === 'members' ? 'is-current' : '' %>" <%= currentTab === 'members' ? '' : 'hidden' %>>
+  <div class="panel"><div class="panel-heading"><div><p class="eyebrow">Member care</p><h2>Member accounts</h2><p>Blocking revokes active refresh sessions. Administrator accounts are protected.</p></div><span class="count-pill"><%= users.length %> recent accounts</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th>Account control</th></tr></thead><tbody>
+      <% users.forEach((user) => { %><tr><td><strong><%= user.firstName %> <%= user.lastName %></strong><small><%= user.email %></small></td><td><span class="role-tag"><%= user.role %></span></td><td><span class="status status-<%= user.status %>"><%= user.status.replaceAll("_", " ") %></span></td><td><%= new Date(user.createdAt).toLocaleDateString("en-NG") %></td><td>
+        <% if (permissions.includes("users:moderate") && user.role !== "admin" && user.status === "active") { %><form method="post" action="/admin/users/<%= user._id %>/block" onsubmit="return confirm('Block this member and revoke active sessions?');"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="button button-danger button-small" type="submit">Block member</button></form>
+        <% } else if (permissions.includes("users:moderate") && user.role !== "admin" && user.status === "suspended") { %><form method="post" action="/admin/users/<%= user._id %>/unblock" onsubmit="return confirm('Restore this member account?');"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="button button-primary button-small" type="submit">Restore member</button></form>
+        <% } else if (user.role === "admin") { %><span class="muted">Protected administrator account</span><% } else { %><span class="muted">No action available</span><% } %>
+      </td></tr><% }) %>
+      <% if (!users.length) { %><tr><td colspan="5" class="empty">No user accounts found.</td></tr><% } %>
+    </tbody></table></div>
+  </div>
+</section>
+
+<section class="section-view <%= currentTab === 'administrators' ? 'is-current' : '' %>" <%= currentTab === 'administrators' ? '' : 'hidden' %>>
+  <div class="dual-section">
+    <article class="panel"><div class="panel-heading compact-heading"><div><p class="eyebrow">Team access</p><h2>Add administrator</h2><p>New administrators receive active, verified portal access.</p></div></div>
+      <% if (permissions.includes("admins:manage")) { %><form method="post" action="/admin/admins" class="form-grid"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><label>First name<input name="firstName" required minlength="2" maxlength="60" autocomplete="given-name"></label><label>Last name<input name="lastName" required minlength="2" maxlength="60" autocomplete="family-name"></label><label class="full-width">Email address<input type="email" name="email" required maxlength="254" autocomplete="email"></label><label class="full-width">Temporary password<input type="password" name="password" required minlength="12" maxlength="128" autocomplete="new-password"></label><p class="form-hint full-width">Use uppercase and lowercase letters, a number, and a symbol.</p><button class="button button-primary full-width" type="submit">Create administrator</button></form><% } else { %><p class="empty">You do not have permission to manage administrators.</p><% } %>
+    </article>
+    <article class="panel"><div class="panel-heading compact-heading"><div><p class="eyebrow">Access directory</p><h2>Administrator team</h2></div><span class="count-pill"><%= admins.length %> records</span></div><div class="directory-list">
+      <% admins.forEach((admin) => { const account = admin.userId || {}; %><div class="directory-item"><span class="avatar"><%= (account.firstName || "A").charAt(0) %><%= (account.lastName || "").charAt(0) %></span><div><strong><%= account.firstName || "Unknown" %> <%= account.lastName || "" %></strong><small><%= account.email || "Account unavailable" %></small></div><span class="status status-<%= admin.active ? 'active' : 'suspended' %>"><%= admin.active ? "active" : "inactive" %></span></div><% }) %>
+      <% if (!admins.length) { %><p class="empty">No administrator records found.</p><% } %>
+    </div></article>
+  </div>
+</section>
+
+<section class="section-view <%= currentTab === 'finance' ? 'is-current' : '' %>" <%= currentTab === 'finance' ? '' : 'hidden' %>>
+  <div class="panel"><div class="panel-heading"><div><p class="eyebrow">Revenue desk</p><h2>Charge earnings</h2><p>Fees recognized through completed platform transactions.</p></div></div>
+    <div class="breakdown-grid"><% earningBreakdown.forEach((item) => { %><article class="mini-card"><span><%= item._id.replaceAll("_", " ") %></span><strong><%= formatNaira(item.totalKobo) %></strong><small><%= item.count %> charges</small></article><% }) %><% if (!earningBreakdown.length) { %><p class="empty">No completed charges yet.</p><% } %></div>
+    <div class="table-wrap"><table><thead><tr><th>Source</th><th>Gross</th><th>Platform fee</th><th>Net / proceeds</th><th>Earned</th></tr></thead><tbody><% recentEarnings.forEach((earning) => { %><tr><td><strong><%= earning.sourceType.replaceAll("_", " ") %></strong><small><%= earning.sourceReference %></small></td><td><%= formatNaira(earning.grossAmountKobo) %></td><td class="money-positive"><%= formatNaira(earning.feeAmountKobo) %></td><td><%= formatNaira(earning.netAmountKobo) %></td><td><%= new Date(earning.earnedAt).toLocaleString("en-NG") %></td></tr><% }) %><% if (!recentEarnings.length) { %><tr><td colspan="5" class="empty">No earnings recorded.</td></tr><% } %></tbody></table></div>
+  </div>
+</section>
+
+<%- include("partials/shell-bottom") %>

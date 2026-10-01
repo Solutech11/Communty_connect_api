@@ -61,6 +61,9 @@ export const getCommunityAndMembership = async (
   if (!community) {
     throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
   }
+  if (community.isActive === false) {
+    throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
+  }
 
   await ensureCommunityMemberRecords(community);
   const membership = await CommunityMemberModel.findOne({ communityId: community._id, userId });

@@ -282,7 +282,6 @@ test("success response schemas expose enums for documented model fields", () => 
     ["POST /communities", "data.community.membershipType", ["free", "premium"]],
     ["POST /communities", "data.community.joinPolicy", ["open", "approval", "invite_only", "access_code"]],
     ["GET /communities/{id}/settings", "data.settings.messagePermission", ["everyone", "moderators"]],
-    ["POST /wallet/transfers", "data.transaction.direction", ["credit", "debit"]],
     ["GET /wallet/transactions", "data.transactions[].type", ["topup", "internal_transfer", "withdrawal", "ticket_purchase", "community_purchase", "refund", "adjustment"]],
     ["GET /wallet/transactions", "data.transactions[].provider", ["internal", "paystack"]],
     ["GET /wallet", "data.wallet.status", ["active", "frozen", "closed"]],

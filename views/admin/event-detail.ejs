@@ -1,0 +1,57 @@
+<%- include("partials/shell-top", {
+  title,
+  csrfToken,
+  permissions,
+  activeTab,
+  sectionLabel: "Event record",
+  heading: event.title,
+  subtitle: "Full listing, review history, ticket inventory, and purchaser activity.",
+  message,
+}) %>
+
+<div class="back-link"><a href="/admin/events">← All events</a><span class="status status-<%= event.status %>"><%= event.status.replaceAll("_", " ") %></span></div>
+<section class="event-hero panel">
+  <% if (event.coverImageUrl) { %><img class="event-cover" src="<%= event.coverImageUrl %>" alt="Event cover"><% } %>
+  <div class="event-hero-copy"><p class="eyebrow"><%= event.activityType %> · <%= event.setting %></p><h2><%= event.title %></h2><p class="event-description"><%= event.description %></p><div class="tag-list"><% (event.tags || []).forEach((tag) => { %><span class="role-tag"><%= tag %></span><% }) %></div></div>
+</section>
+
+<section class="stats-grid stats-grid-compact">
+  <article class="stat-card"><span>Tickets sold</span><strong><%= paidSummary.tickets.toLocaleString("en-NG") %></strong><small><%= paidSummary.orders.toLocaleString("en-NG") %> paid orders</small></article>
+  <article class="stat-card"><span>Paid by attendees</span><strong><%= formatNaira(paidSummary.grossKobo) %></strong><small>Includes checkout fees</small></article>
+  <article class="stat-card"><span>Capacity</span><strong><%= Number(event.maxCapacity).toLocaleString("en-NG") %></strong><small><%= event.country %></small></article>
+  <article class="stat-card"><span>Event status</span><strong class="metric-word"><%= event.status.replaceAll("_", " ") %></strong><small><%= (statusCounts.paid || 0).toLocaleString("en-NG") %> paid · <%= (statusCounts.refunded || 0).toLocaleString("en-NG") %> refunded orders</small></article>
+</section>
+
+<div class="detail-grid">
+  <section class="panel detail-panel"><div class="panel-heading"><div><p class="eyebrow">The listing</p><h2>Event details</h2></div></div><dl class="detail-list">
+    <div><dt>Organizer</dt><dd><%= event.creatorId?.firstName || "Unknown" %> <%= event.creatorId?.lastName || "" %><small><%= event.creatorId?.email || "" %></small></dd></div>
+    <div><dt>When</dt><dd><%= new Date(event.startsAt).toLocaleString("en-NG", { dateStyle: "full", timeStyle: "short", timeZone: event.timezone }) %><small>Ends <%= new Date(event.endsAt).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short", timeZone: event.timezone }) %> · <%= event.timezone %></small></dd></div>
+    <div><dt>Venue</dt><dd><%= event.venueName %><small><%= event.address %>, <%= event.lga %>, <%= event.state %></small></dd></div>
+    <div><dt>Format</dt><dd><%= event.setting %><small><%= event.targetAudience || "No audience specified" %></small></dd></div>
+    <div><dt>Organizer contact</dt><dd><%= event.contactPhone || "Not provided" %></dd></div>
+    <div><dt>Created</dt><dd><%= new Date(event.createdAt).toLocaleString("en-NG") %><small>Submitted <%= event.submittedAt ? new Date(event.submittedAt).toLocaleString("en-NG") : "Not submitted" %></small></dd></div>
+    <% if (event.deactivationReason) { %><div><dt>Deactivation note</dt><dd><%= event.deactivationReason %></dd></div><% } %>
+  </dl></section>
+  <section class="panel detail-panel"><div class="panel-heading"><div><p class="eyebrow">Ticket catalog</p><h2>Ticket types</h2><p>Pricing and inventory totals attached to this event.</p></div></div>
+    <div class="ticket-type-list"><% ticketTypes.forEach((ticket) => { %><article class="ticket-type-card"><div class="ticket-type-title"><strong><%= ticket.title %></strong><span class="status <%= ticket.active ? 'status-active' : 'status-deactivated' %>"><%= ticket.active ? "On sale" : "Inactive" %></span></div><p><%= ticket.description || "No ticket description" %></p><div class="ticket-type-meta"><span><strong><%= formatNaira(ticket.priceKobo) %></strong> per ticket</span><span><strong><%= ticket.sold %></strong> sold</span><span><strong><%= ticket.capacity ?? "Unlimited" %></strong> capacity</span></div></article><% }) %><% if (!ticketTypes.length) { %><p class="empty">No ticket types found.</p><% } %></div>
+  </section>
+</div>
+
+<section class="panel moderation-record">
+  <div class="panel-heading"><div><p class="eyebrow">Review history</p><h2>Moderation and controls</h2><p>Review why the event was approved, rejected, or deactivated.</p></div></div>
+  <% if (event.moderation) { %><div class="moderation-summary"><span class="status status-<%= event.moderation.verdict === 'approved' ? 'active' : 'rejected' %>"><%= event.moderation.verdict %></span><span>Reviewed <%= new Date(event.moderation.reviewedAt).toLocaleString("en-NG") %> · <%= event.moderation.provider %> / <%= event.moderation.model %></span></div><% if (event.moderation.reasons?.length) { %><ul class="reason-list"><% event.moderation.reasons.forEach((reason) => { %><li><%= reason %></li><% }) %></ul><% } %><div class="review-checks"><% Object.entries(event.moderation.checks || {}).forEach(([label, check]) => { %><article><strong><%= label.replaceAll(/([A-Z])/g, " $1") %></strong><span class="status <%= check.acceptable ? 'status-active' : 'status-rejected' %>"><%= check.acceptable ? "passed" : "flagged" %></span><% (check.reasons || []).forEach((reason) => { %><small><%= reason %></small><% }) %></article><% }) %></div><% } else { %><p class="empty">No automated review record.</p><% } %>
+  <div class="moderation-actions">
+    <% if (permissions.includes("events:moderate") && event.status === "pending_approval") { %><form method="post" action="/admin/events/<%= event._id %>/approve"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="button button-primary" type="submit">Approve and publish</button></form><% } %>
+    <% if (permissions.includes("events:moderate") && event.status === "published") { %><form method="post" action="/admin/events/<%= event._id %>/deactivate" class="deactivate-form"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><label>Reason for deactivation<input name="reason" required minlength="5" maxlength="300" placeholder="Explain the moderation decision"></label><button class="button button-danger" type="submit">Deactivate event</button></form><% } %>
+    <% if (event.status === "deactivated" || event.status === "rejected") { %><p class="muted">This event is not currently published. Re-review must go through the organizer submission workflow.</p><% } %>
+  </div>
+</section>
+
+<section class="panel"><div class="panel-heading panel-heading-filter"><div><p class="eyebrow">Attendee ledger</p><h2>Ticket purchases</h2><p>Buyer, quantity, event ticket, payment split, and check-in state for each order.</p></div><form method="get" action="/admin/events/<%= event._id %>" class="filter-form"><label>Order status<select name="status"><% ["paid", "pending", "refunded", "cancelled", "all"].forEach((value) => { %><option value="<%= value %>" <%= status === value ? "selected" : "" %>><%= value === "all" ? "All orders" : value %></option><% }) %></select></label><button class="button button-primary" type="submit">Filter orders</button></form></div>
+  <div class="table-wrap"><table class="ticket-table"><thead><tr><th>Order</th><th>Attendee</th><th>Ticket</th><th>Quantity</th><th>Ticket amount</th><th>Platform fee</th><th>Total paid</th><th>Organizer proceeds</th><th>Payment</th><th>Check-in</th></tr></thead><tbody>
+    <% orders.forEach((order) => { const buyer = order.buyerId || {}; const ticket = order.ticketTypeId || {}; const checkedBy = order.checkedInBy || {}; %><tr><td><strong><%= order.orderNumber %></strong><small><%= new Date(order.createdAt).toLocaleString("en-NG") %></small></td><td><strong><%= buyer.firstName || "Unknown" %> <%= buyer.lastName || "" %></strong><small><%= buyer.email || "" %></small></td><td><%= ticket.title || "Ticket removed" %><small><%= ticket.priceKobo !== undefined ? formatNaira(ticket.priceKobo) + " each" : "Price unavailable" %> · <%= order.checkoutClient %> checkout</small></td><td><%= order.quantity %></td><td><%= formatNaira(order.ticketSubtotalKobo) %></td><td><%= formatNaira(order.platformFeeKobo) %></td><td><strong><%= formatNaira(order.totalKobo) %></strong></td><td><%= formatNaira(order.organizerProceedsKobo) %></td><td><span class="status status-<%= order.status %>"><%= order.status %></span><small><%= order.paidAt ? new Date(order.paidAt).toLocaleString("en-NG") : "Not paid" %></small></td><td><%= order.checkedInAt ? new Date(order.checkedInAt).toLocaleString("en-NG") : "Not checked in" %><% if (checkedBy.firstName) { %><small>By <%= checkedBy.firstName %> <%= checkedBy.lastName || "" %></small><% } %></td></tr><% }) %>
+    <% if (!orders.length) { %><tr><td colspan="10" class="empty">No orders for this status.</td></tr><% } %>
+  </tbody></table></div>
+  <div class="pagination"><span>Page <%= page %> of <%= pageCount %> · <%= orderCount.toLocaleString("en-NG") %> orders</span><div><% if (page > 1) { %><a class="button button-soft button-small" href="/admin/events/<%= event._id %>?status=<%= status %>&amp;page=<%= page - 1 %>">Previous</a><% } %><% if (page < pageCount) { %><a class="button button-soft button-small" href="/admin/events/<%= event._id %>?status=<%= status %>&amp;page=<%= page + 1 %>">Next</a><% } %></div></div>
+</section>
+<%- include("partials/shell-bottom") %>

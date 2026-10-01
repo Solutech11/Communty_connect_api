@@ -1,34 +1,23 @@
-import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
-import { CACHE_KEYS } from "../Constant";
-import { env } from "../Config/env";
-import { redisClient } from "../DB/redis";
-import { UserModel } from "../models/Auth/User.model";
 import { BankAccountModel } from "../models/Wallet/BankAccount.model";
 import { TransactionModel } from "../models/Wallet/Transaction.model";
 import { WalletModel } from "../models/Wallet/Wallet.model";
+import { nextPayoutMidnight, PAYOUT_TIMEZONE, MIN_AUTOMATIC_PAYOUT_KOBO } from "../utils/payoutSchedule.utils";
+import { walletCreditUpdate } from "../utils/walletCredit.utils";
+import { getActiveWalletBanks, resolveWalletBankAccount } from "../utils/bankAccount.utils";
 import { AppError } from "../utils/AppError";
 import { encryptField, maskAccountNumber, sha256 } from "../utils/crypto.utils";
 import {
   createPaystackTransferRecipient,
   finalizePaystackTransfer,
-  initializePaystackTransaction,
-  initiatePaystackTransfer,
-  listPaystackBanks,
-  resolvePaystackAccount,
   verifyPaystackTransaction,
 } from "../utils/paystack.utils";
-import { withRedisLock } from "../utils/redisLock.utils";
-import { calculatePlatformCharge, recordPlatformEarning } from "../utils/platformCharge.utils";
+import { recordPlatformEarning } from "../utils/platformCharge.utils";
 import { logger } from "../utils/logger.utils";
 import { matchesPaystackSettlement } from "../utils/paystackSettlement.utils";
 import { formatNaira, sendPaymentReceiptEmail } from "../utils/paymentEmail.utils";
 import { sendSuccess } from "../utils/response.utils";
-
-const financialReference = (prefix: string): string => {
-  return `${prefix}_${randomUUID()}`.toLowerCase();
-};
 
 export const getWallet = async (request: Request, response: Response): Promise<Response> => {
   const wallet = await WalletModel.findOne({ userId: request.auth?.id });
@@ -37,7 +26,30 @@ export const getWallet = async (request: Request, response: Response): Promise<R
     throw new AppError(404, "Wallet was not found", "WALLET_NOT_FOUND");
   }
 
-  return sendSuccess(response, 200, "Wallet retrieved", { wallet });
+  const bankAccount = await BankAccountModel.findOne({ userId: request.auth?.id, active: true })
+    .sort({ isDefault: -1, createdAt: 1, _id: 1 })
+    .select("_id bankName accountName maskedAccountNumber").lean();
+  const now = new Date();
+  return sendSuccess(response, 200, "Wallet retrieved", {
+    wallet: {
+      _id: wallet._id, walletNumber: wallet.walletNumber, currency: wallet.currency,
+      availableBalanceKobo: wallet.availableBalanceKobo, pendingBalanceKobo: wallet.pendingBalanceKobo,
+      status: wallet.status,
+    },
+    payout: {
+      automatic: true,
+      minimumAmountKobo: MIN_AUTOMATIC_PAYOUT_KOBO,
+      timezone: PAYOUT_TIMEZONE,
+      serverTime: now.toISOString(),
+      nextPayoutAt: nextPayoutMidnight(now).toISOString(),
+      status: wallet.status !== "active" ? "paused"
+        : wallet.pendingBalanceKobo > 0 ? "processing"
+        : !bankAccount ? "bank_required"
+        : wallet.availableBalanceKobo > 0 && wallet.availableBalanceKobo < MIN_AUTOMATIC_PAYOUT_KOBO ? "below_minimum"
+        : wallet.availableBalanceKobo > 0 ? "scheduled" : "empty",
+      bankAccount: bankAccount || null,
+    },
+  });
 };
 
 export const listTransactions = async (request: Request, response: Response): Promise<Response> => {
@@ -79,76 +91,6 @@ export const getTransaction = async (request: Request, response: Response): Prom
   }
 
   return sendSuccess(response, 200, "Transaction retrieved", { transaction });
-};
-
-export const initializeTopup = async (request: Request, response: Response): Promise<Response> => {
-  const userId = request.auth?.id as string;
-  const amountKobo = request.body.amountKobo;
-  const feeKobo = calculatePlatformCharge(amountKobo, "deposit");
-  const totalPayableKobo = amountKobo + feeKobo;
-
-  if (amountKobo < env.MIN_TOPUP_KOBO) {
-    throw new AppError(422, `Minimum top-up is ${env.MIN_TOPUP_KOBO} kobo`, "TOPUP_BELOW_MINIMUM");
-  }
-
-  return withRedisLock(CACHE_KEYS.lock("wallet-topup", userId), async () => {
-    const wallet = await WalletModel.findOne({ userId, status: "active" });
-
-    if (!wallet) {
-      throw new AppError(404, "Active wallet was not found", "WALLET_NOT_FOUND");
-    }
-
-    const idempotencyKey = request.idempotencyKey as string;
-    const existing = await TransactionModel.findOne({ userId, idempotencyKey });
-
-    if (existing) {
-      return sendSuccess(response, 200, "Top-up already initialized", { transaction: existing });
-    }
-
-    const reference = financialReference("topup");
-    const transaction = await TransactionModel.create({
-      reference,
-      providerReference: reference,
-      walletId: wallet._id,
-      userId,
-      type: "topup",
-      direction: "credit",
-      amountKobo,
-      feeKobo,
-      status: "pending",
-      title: "Wallet top-up",
-      description: "Wallet funding through Paystack",
-      provider: "paystack",
-      idempotencyKey,
-      metadata: { walletCreditKobo: amountKobo, totalPayableKobo },
-    });
-
-    try {
-      const provider = await initializePaystackTransaction({
-        email: request.auth?.email as string,
-        amountKobo: totalPayableKobo,
-        reference,
-        metadata: {
-          transactionId: transaction._id.toString(),
-          userId,
-          walletId: wallet._id.toString(),
-          purpose: "wallet_topup",
-        },
-      });
-      return sendSuccess(response, 201, "Top-up initialized", {
-        transaction,
-        authorizationUrl: provider.authorization_url,
-        accessCode: provider.access_code,
-        reference: provider.reference,
-        publicKey: env.PAYSTACK_PUBLIC_KEY,
-        charge: { walletCreditKobo: amountKobo, feeKobo, totalPayableKobo },
-      });
-    } catch (error) {
-      transaction.status = "failed";
-      await transaction.save();
-      throw error;
-    }
-  });
 };
 
 export const verifyTopup = async (request: Request, response: Response): Promise<Response> => {
@@ -231,8 +173,8 @@ export const creditVerifiedTopup = async (
 
       const wallet = await WalletModel.findOneAndUpdate(
         { _id: transaction.walletId, status: "active" },
-        { $inc: { availableBalanceKobo: transaction.amountKobo } },
-        { new: true, session },
+        walletCreditUpdate(transaction.amountKobo),
+        { new: true, session, updatePipeline: true },
       );
 
       if (!wallet) {
@@ -283,20 +225,13 @@ export const creditVerifiedTopup = async (
 };
 
 export const listBanks = async (_request: Request, response: Response): Promise<Response> => {
-  if (redisClient.isReady) {
-    const cached = await redisClient.get(CACHE_KEYS.banks);
-    if (cached) {
-      return sendSuccess(response, 200, "Banks retrieved", { banks: JSON.parse(cached) });
-    }
-  }
-
-  const banks = (await listPaystackBanks()).filter((bank) => bank.active);
-
-  if (redisClient.isReady) {
-    await redisClient.set(CACHE_KEYS.banks, JSON.stringify(banks), { EX: 24 * 60 * 60 });
-  }
-
+  const banks = await getActiveWalletBanks();
   return sendSuccess(response, 200, "Banks retrieved", { banks });
+};
+
+export const resolveBankAccount = async (request: Request, response: Response): Promise<Response> => {
+  const resolution = await resolveWalletBankAccount(request.body.accountNumber, request.body.bankCode);
+  return sendSuccess(response, 200, "Bank account resolved", { resolution });
 };
 
 export const addBankAccount = async (request: Request, response: Response): Promise<Response> => {
@@ -312,36 +247,34 @@ export const addBankAccount = async (request: Request, response: Response): Prom
     return sendSuccess(response, 200, "Bank account already saved", { bankAccount: existing });
   }
 
-  const [resolved, banks] = await Promise.all([
-    resolvePaystackAccount(accountNumber, bankCode),
-    listPaystackBanks(),
-  ]);
-  const bank = banks.find((item) => item.code === bankCode);
-
-  if (!bank) {
-    throw new AppError(422, "Bank code is invalid", "INVALID_BANK_CODE");
-  }
+  const resolved = await resolveWalletBankAccount(accountNumber, bankCode);
 
   const recipient = await createPaystackTransferRecipient({
-    name: resolved.account_name,
+    name: resolved.accountName,
     accountNumber,
     bankCode,
   });
-  const bankAccount = await BankAccountModel.create({
+  // Reactivate a previously removed account without colliding with its unique
+  // fingerprint. Relinking must work when a daily reminder prompts the user.
+  const bankAccount = await BankAccountModel.findOneAndUpdate({
+    userId: request.auth?.id, accountFingerprint: fingerprint,
+  }, { $set: {
     userId: request.auth?.id,
     bankCode,
-    bankName: bank.name,
-    accountName: resolved.account_name,
+    bankName: resolved.bankName,
+    accountName: resolved.accountName,
     encryptedAccountNumber: encryptField(accountNumber),
     maskedAccountNumber: maskAccountNumber(accountNumber),
     accountFingerprint: fingerprint,
     paystackRecipientCode: recipient.recipient_code,
-  });
+    active: true,
+  } }, { upsert: true, new: true, runValidators: true });
   return sendSuccess(response, 201, "Bank account saved", { bankAccount });
 };
 
 export const listBankAccounts = async (request: Request, response: Response): Promise<Response> => {
-  const bankAccounts = await BankAccountModel.find({ userId: request.auth?.id, active: true });
+  const bankAccounts = await BankAccountModel.find({ userId: request.auth?.id, active: true })
+    .sort({ isDefault: -1, createdAt: 1, _id: 1 });
   return sendSuccess(response, 200, "Bank accounts retrieved", { bankAccounts });
 };
 
@@ -356,237 +289,6 @@ export const removeBankAccount = async (request: Request, response: Response): P
   }
 
   return sendSuccess(response, 200, "Bank account removed");
-};
-
-export const internalTransfer = async (request: Request, response: Response): Promise<Response> => {
-  const userId = request.auth?.id as string;
-  const amountKobo = request.body.amountKobo;
-  const idempotencyKey = request.idempotencyKey as string;
-
-  return withRedisLock(CACHE_KEYS.lock("wallet-transfer", userId), async () => {
-    const existing = await TransactionModel.findOne({ userId, idempotencyKey });
-    if (existing) {
-      return sendSuccess(response, 200, "Transfer already processed", { transaction: existing });
-    }
-
-    const recipientUser = request.body.recipient.includes("@")
-      ? await UserModel.findOne({ email: request.body.recipient.toLowerCase(), status: "active" })
-      : await WalletModel.findOne({ walletNumber: request.body.recipient, status: "active" })
-          .then((wallet) => wallet ? UserModel.findById(wallet.userId) : null);
-
-    if (!recipientUser || recipientUser._id.toString() === userId) {
-      throw new AppError(422, "Recipient is invalid", "INVALID_TRANSFER_RECIPIENT");
-    }
-
-    const session = await mongoose.startSession();
-    let debitTransactionId: string | undefined;
-
-    try {
-      await session.withTransaction(async () => {
-        const senderWallet = await WalletModel.findOneAndUpdate(
-          { userId, status: "active", availableBalanceKobo: { $gte: amountKobo } },
-          { $inc: { availableBalanceKobo: -amountKobo } },
-          { new: true, session },
-        );
-
-        if (!senderWallet) {
-          throw new AppError(422, "Wallet balance is insufficient", "INSUFFICIENT_BALANCE");
-        }
-
-        const recipientWallet = await WalletModel.findOneAndUpdate(
-          { userId: recipientUser._id, status: "active" },
-          { $inc: { availableBalanceKobo: amountKobo } },
-          { new: true, session },
-        );
-
-        if (!recipientWallet) {
-          throw new AppError(409, "Recipient wallet is unavailable", "RECIPIENT_WALLET_UNAVAILABLE");
-        }
-
-        const baseReference = financialReference("transfer");
-        const [debit] = await TransactionModel.create(
-          [
-            {
-              reference: `${baseReference}_debit`,
-              walletId: senderWallet._id,
-              userId,
-              counterpartyUserId: recipientUser._id,
-              type: "internal_transfer",
-              direction: "debit",
-              amountKobo,
-              status: "successful",
-              title: "Wallet transfer",
-              description: request.body.note,
-              provider: "internal",
-              idempotencyKey,
-              completedAt: new Date(),
-            },
-          ],
-          { session },
-        );
-        await TransactionModel.create(
-          [
-            {
-              reference: `${baseReference}_credit`,
-              walletId: recipientWallet._id,
-              userId: recipientUser._id,
-              counterpartyUserId: userId,
-              type: "internal_transfer",
-              direction: "credit",
-              amountKobo,
-              status: "successful",
-              title: "Wallet transfer received",
-              description: request.body.note,
-              provider: "internal",
-              idempotencyKey: `${idempotencyKey}_recipient`,
-              completedAt: new Date(),
-            },
-          ],
-          { session },
-        );
-        debitTransactionId = debit?._id.toString();
-      });
-    } finally {
-      await session.endSession();
-    }
-
-    const transaction = await TransactionModel.findById(debitTransactionId);
-    const recipientName = `${recipientUser.firstName} ${recipientUser.lastName}`.trim();
-    await Promise.all([
-      sendPaymentReceiptEmail({
-        userId,
-        subject: "Your wallet transfer was sent",
-        heading: "Wallet transfer sent",
-        amountPaidKobo: amountKobo,
-        amountLabel: "Amount sent",
-        details: [
-          { label: "Recipient", value: recipientName },
-        ],
-      }),
-      sendPaymentReceiptEmail({
-        userId: recipientUser._id.toString(),
-        subject: "You received a wallet transfer",
-        heading: "Wallet transfer received",
-        amountPaidKobo: amountKobo,
-        amountLabel: "Amount received",
-        details: [
-          { label: "From", value: "A Community Connect member" },
-        ],
-      }),
-    ]);
-    return sendSuccess(response, 201, "Transfer completed", { transaction });
-  });
-};
-
-export const withdraw = async (request: Request, response: Response): Promise<Response> => {
-  const userId = request.auth?.id as string;
-  const amountKobo = request.body.amountKobo;
-  const feeKobo = calculatePlatformCharge(amountKobo, "withdrawal");
-  const payoutAmountKobo = amountKobo - feeKobo;
-  const idempotencyKey = request.idempotencyKey as string;
-
-  if (payoutAmountKobo <= 0) {
-    throw new AppError(422, "Withdrawal charge leaves no payable amount", "INVALID_WITHDRAWAL_CHARGE");
-  }
-
-  if (amountKobo < env.MIN_WITHDRAWAL_KOBO) {
-    throw new AppError(
-      422,
-      `Minimum withdrawal is ${env.MIN_WITHDRAWAL_KOBO} kobo`,
-      "WITHDRAWAL_BELOW_MINIMUM",
-    );
-  }
-
-  return withRedisLock(CACHE_KEYS.lock("wallet-withdrawal", userId), async () => {
-    const existing = await TransactionModel.findOne({ userId, idempotencyKey });
-    if (existing) {
-      return sendSuccess(response, 200, "Withdrawal already submitted", { transaction: existing });
-    }
-
-    const bankAccount = await BankAccountModel.findOne({
-      _id: request.body.bankAccountId,
-      userId,
-      active: true,
-    });
-    if (!bankAccount) {
-      throw new AppError(404, "Bank account was not found", "BANK_ACCOUNT_NOT_FOUND");
-    }
-
-    const reference = financialReference("withdrawal");
-    const session = await mongoose.startSession();
-    let transactionId: string | undefined;
-
-    try {
-      await session.withTransaction(async () => {
-        const wallet = await WalletModel.findOneAndUpdate(
-          { userId, status: "active", availableBalanceKobo: { $gte: amountKobo } },
-          {
-            $inc: {
-              availableBalanceKobo: -amountKobo,
-              pendingBalanceKobo: amountKobo,
-            },
-          },
-          { new: true, session },
-        );
-
-        if (!wallet) {
-          throw new AppError(422, "Wallet balance is insufficient", "INSUFFICIENT_BALANCE");
-        }
-
-        const [transaction] = await TransactionModel.create(
-          [
-            {
-              reference,
-              providerReference: reference,
-              walletId: wallet._id,
-              userId,
-              type: "withdrawal",
-              direction: "debit",
-              amountKobo,
-              feeKobo,
-              status: "processing",
-              title: "Wallet withdrawal",
-              description: `Withdrawal to ${bankAccount.bankName} ${bankAccount.maskedAccountNumber}`,
-              provider: "paystack",
-              idempotencyKey,
-              metadata: {
-                bankAccountId: bankAccount._id.toString(),
-                refundApplied: false,
-                payoutAmountKobo,
-              },
-            },
-          ],
-          { session },
-        );
-        transactionId = transaction?._id.toString();
-      });
-    } finally {
-      await session.endSession();
-    }
-
-    const transaction = await TransactionModel.findById(transactionId);
-
-    try {
-      const provider = await initiatePaystackTransfer({
-        amountKobo: payoutAmountKobo,
-        recipientCode: bankAccount.paystackRecipientCode as string,
-        reference,
-        reason: "Community Connect wallet withdrawal",
-      });
-      await TransactionModel.updateOne(
-        { _id: transaction?._id },
-        { $set: { "metadata.transferCode": provider.transfer_code, "metadata.providerStatus": provider.status } },
-      );
-      const refreshed = await TransactionModel.findById(transaction?._id);
-      return sendSuccess(response, 202, "Withdrawal submitted", {
-        transaction: refreshed,
-        charge: { withdrawalAmountKobo: amountKobo, feeKobo, payoutAmountKobo },
-      });
-    } catch (error) {
-      await refundWithdrawal(reference, "provider_initialization_failed");
-      throw error;
-    }
-  });
 };
 
 export const finalizeWithdrawal = async (request: Request, response: Response): Promise<Response> => {
@@ -610,114 +312,4 @@ export const finalizeWithdrawal = async (request: Request, response: Response): 
   return sendSuccess(response, 202, "Withdrawal OTP accepted", { transaction });
 };
 
-export const completeWithdrawal = async (reference: string): Promise<void> => {
-  const session = await mongoose.startSession();
-  let receipt: {
-    userId: string;
-    withdrawalAmountKobo: number;
-    payoutAmountKobo: number;
-    platformFeeKobo: number;
-  } | undefined;
-
-  try {
-    await session.withTransaction(async () => {
-      receipt = undefined;
-      const transaction = await TransactionModel.findOne({
-        reference,
-        type: "withdrawal",
-        status: { $in: ["pending", "processing"] },
-      }).session(session);
-
-      if (!transaction) {
-        return;
-      }
-
-      const metadata = transaction.metadata as { payoutAmountKobo?: number };
-      const payoutAmountKobo = metadata.payoutAmountKobo
-        ?? transaction.amountKobo - (transaction.feeKobo || 0);
-      const walletResult = await WalletModel.updateOne(
-        { _id: transaction.walletId, pendingBalanceKobo: { $gte: transaction.amountKobo } },
-        { $inc: { pendingBalanceKobo: -transaction.amountKobo } },
-        { session },
-      );
-
-      if (walletResult.modifiedCount !== 1) {
-        throw new AppError(409, "Reserved withdrawal funds are unavailable", "WITHDRAWAL_RESERVE_MISSING");
-      }
-
-      transaction.status = "successful";
-      transaction.completedAt = new Date();
-      await transaction.save({ session });
-      await recordPlatformEarning({
-        sourceType: "withdrawal",
-        sourceReference: transaction.reference,
-        payerUserId: transaction.userId,
-        transactionId: transaction._id,
-        grossAmountKobo: transaction.amountKobo,
-        feeAmountKobo: transaction.feeKobo || 0,
-        netAmountKobo: payoutAmountKobo,
-        session,
-      });
-      receipt = {
-        userId: transaction.userId.toString(),
-        withdrawalAmountKobo: transaction.amountKobo,
-        payoutAmountKobo,
-        platformFeeKobo: transaction.feeKobo || 0,
-      };
-    });
-  } finally {
-    await session.endSession();
-  }
-
-  if (receipt) {
-    const details = [
-      { label: "Requested withdrawal", value: formatNaira(receipt.withdrawalAmountKobo) },
-      { label: "Platform fee", value: formatNaira(receipt.platformFeeKobo) },
-    ];
-    await sendPaymentReceiptEmail({
-      userId: receipt.userId,
-      subject: "Your wallet withdrawal is complete",
-      heading: "Wallet withdrawal complete",
-      amountPaidKobo: receipt.payoutAmountKobo,
-      amountLabel: "Amount received",
-      details,
-    });
-  }
-};
-
-export const refundWithdrawal = async (reference: string, reason: string): Promise<void> => {
-  const session = await mongoose.startSession();
-
-  try {
-    await session.withTransaction(async () => {
-      const transaction = await TransactionModel.findOne({
-        reference,
-        type: "withdrawal",
-        status: { $in: ["pending", "processing"] },
-        "metadata.refundApplied": { $ne: true },
-      }).session(session);
-
-      if (!transaction) {
-        return;
-      }
-
-      await WalletModel.updateOne(
-        { _id: transaction.walletId, pendingBalanceKobo: { $gte: transaction.amountKobo } },
-        {
-          $inc: {
-            pendingBalanceKobo: -transaction.amountKobo,
-            availableBalanceKobo: transaction.amountKobo,
-          },
-        },
-        { session },
-      );
-      transaction.status = "reversed";
-      transaction.set("metadata.refundApplied", true);
-      transaction.set("metadata.refundReason", reason);
-      transaction.completedAt = new Date();
-      await transaction.save({ session });
-    });
-  } finally {
-    await session.endSession();
-  }
-};
+export { completeWithdrawal, refundWithdrawal } from "../utils/walletSettlement.utils";

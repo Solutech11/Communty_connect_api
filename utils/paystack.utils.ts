@@ -46,7 +46,7 @@ interface PaystackRecipientData {
   };
 }
 
-interface PaystackTransferData {
+export interface PaystackTransferData {
   transfer_code: string;
   reference: string;
   status: string;
@@ -210,6 +210,41 @@ export const initiatePaystackTransfer = async (input: {
       currency: env.PAYSTACK_CURRENCY,
     }),
   );
+};
+
+export const initiatePaystackBulkTransfers = async (transfers: Array<{
+  amountKobo: number;
+  recipientCode: string;
+  reference: string;
+}>): Promise<PaystackTransferData[]> => {
+  if (transfers.length < 1 || transfers.length > 100) {
+    throw new TypeError("A payout batch must contain between 1 and 100 transfers");
+  }
+  return runPaystackRequest("initiate_bulk_transfers", () => paystack.post("/transfer/bulk", {
+    source: "balance",
+    currency: "NGN",
+    transfers: transfers.map((transfer) => ({
+      amount: transfer.amountKobo,
+      recipient: transfer.recipientCode,
+      reference: transfer.reference,
+      reason: "Community Connect daily automatic payout",
+    })),
+  }));
+};
+
+export const verifyPaystackTransfer = async (reference: string): Promise<PaystackTransferData | null> => {
+  return runPaystackRequest("verify_transfer", async () => {
+    try {
+      return await paystack.get(`/transfer/verify/${encodeURIComponent(reference)}`);
+    } catch (error) {
+      // Only a definitive not-found permits re-submission, with the SAME
+      // reference. A timeout or provider outage must keep funds reserved.
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return { data: { status: true, message: "Transfer not found", data: null } };
+      }
+      throw error;
+    }
+  });
 };
 
 export const finalizePaystackTransfer = async (

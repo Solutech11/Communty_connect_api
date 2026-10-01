@@ -6,6 +6,8 @@ import swaggerUi from "swagger-ui-express";
 import { env } from "./Config/env";
 import { openApiDocument } from "./Config/swagger";
 import { startTicketReservationCron } from "./Cron/ticketReservation.cron";
+import { startWalletPayoutCron } from "./Cron/walletPayout.cron";
+import { initializeWalletPayouts } from "./utils/automaticPayout.utils";
 import { connectMongo, disconnectMongo } from "./DB/mongo";
 import { connectRedis, disconnectRedis } from "./DB/redis";
 import {
@@ -145,6 +147,7 @@ app.use(errorHandler);
 export const startApp = async (): Promise<void> => {
   // Fail startup before listening if required persistence or locking is unavailable.
   await Promise.all([connectMongo(), connectRedis()]);
+  await initializeWalletPayouts();
 
   const server = app.listen(env.PORT, () => {
     logger.info(
@@ -161,6 +164,7 @@ export const startApp = async (): Promise<void> => {
   // REST message controllers reuse this authenticated namespace for socket emits.
   app.set("io", io.of("/chat"));
   const stopTicketReservationCron = startTicketReservationCron();
+  const stopWalletPayoutCron = startWalletPayoutCron();
   let shuttingDown = false;
 
   const shutdown = async (signal: string): Promise<void> => {
@@ -178,6 +182,7 @@ export const startApp = async (): Promise<void> => {
     }, 15_000);
     forceExitTimer.unref();
     stopTicketReservationCron();
+    await stopWalletPayoutCron();
 
     await new Promise<void>((resolve) => {
       io.close(() => resolve());

@@ -1,0 +1,34 @@
+<%- include("partials/shell-top", {
+  title,
+  csrfToken,
+  permissions,
+  activeTab,
+  sectionLabel: "Trust and safety",
+  heading: "Reports",
+  subtitle: "Review member reports, inspect the reported content, and record each decision.",
+  message,
+}) %>
+
+<section class="stats-grid stats-grid-compact"><article class="stat-card"><span>Open reports</span><strong><%= counts.open || 0 %></strong><small>Waiting for review</small></article><article class="stat-card"><span>In review</span><strong><%= counts.reviewing || 0 %></strong><small>Being handled</small></article><article class="stat-card"><span>Resolved</span><strong><%= counts.resolved || 0 %></strong><small>Action recorded</small></article><article class="stat-card"><span>Dismissed</span><strong><%= counts.dismissed || 0 %></strong><small>Closed with a reason</small></article></section>
+
+<section class="panel"><div class="panel-heading panel-heading-filter"><div><p class="eyebrow">Moderation inbox</p><h2>Report queue</h2><p>Reports stay in the queue until an administrator records a decision.</p></div><form method="get" action="/admin/reports" class="filter-form"><label>Queue<select name="status"><% ["open", "reviewing", "resolved", "dismissed", "all"].forEach((value) => { %><option value="<%= value %>" <%= status === value ? "selected" : "" %>><%= value === "all" ? "All reports" : value %></option><% }) %></select></label><button class="button button-primary" type="submit">View queue</button></form></div>
+  <div class="report-list">
+    <% reports.forEach((report) => { const target = report.target || {}; const reporter = report.reporterId || {}; const targetCommunity = report.targetType === "community_message" ? target.communityId || {} : null; const contentAuthor = report.targetType === "community_message" ? target.authorId || {} : null; %>
+      <article class="report-card">
+        <div class="report-head"><div><span class="status status-<%= report.status %>"><%= report.status %></span><span class="role-tag"><%= report.targetType.replaceAll("_", " ") %></span><span class="role-tag"><%= report.reason.replaceAll("_", " ") %></span></div><time><%= new Date(report.createdAt).toLocaleString("en-NG") %></time></div>
+        <div class="report-columns"><div><p class="eyebrow">Reporter</p><strong><%= reporter.firstName || "Account unavailable" %> <%= reporter.lastName || "" %></strong><small>Reporter ID · <%= report.reporterId?._id || report.reporterId %></small></div><div><p class="eyebrow">Reported item</p>
+          <% if (report.targetType === "event") { %><strong><%= target.title || "Event no longer available" %></strong><small><%= target.status || "" %> · <%= target.state || "" %><%= target.lga ? ", " + target.lga : "" %></small><% if (target._id) { %><a class="text-link" href="/admin/events/<%= target._id %>">Open event and ticket details ↗</a><% } %>
+          <% } else if (report.targetType === "community") { %><strong><%= target.name || "Community no longer available" %></strong><small><%= target.visibility || "" %> · <%= target.isActive === false ? "deactivated" : "active" %></small><% if (target._id) { %><a class="text-link" href="/admin/communities/<%= target._id %>">Open community controls ↗</a><% } %>
+          <% } else if (report.targetType === "user") { %><strong><%= target.firstName || "Account unavailable" %> <%= target.lastName || "" %></strong><small><%= target.role || "member" %> · <%= target.status || "" %></small>
+          <% } else { %><strong><%= target.kind || "Community message" %> in <%= targetCommunity.name || "community unavailable" %></strong><blockquote><%= target.text || (target.deletedAt ? "This message has been removed." : "No message text was stored.") %></blockquote><small>Posted by <%= contentAuthor.firstName || "Unknown" %> <%= contentAuthor.lastName || "" %><% if (target.communityId?._id) { %> · <a class="text-link" href="/admin/communities/<%= target.communityId._id %>">View community ↗</a><% } %></small><% } %>
+        </div></div>
+        <% if (report.details) { %><div class="report-details"><p class="eyebrow">Member's explanation</p><p><%= report.details %></p></div><% } %>
+        <% if (["resolved", "dismissed"].includes(report.status)) { %><div class="resolution-record"><strong><%= report.status === "resolved" ? "Action taken" : "Report dismissed" %></strong><p><%= report.resolution || "No resolution note recorded." %></p><small><%= report.reviewedAt ? new Date(report.reviewedAt).toLocaleString("en-NG") : "" %></small></div>
+        <% } else { %><form method="post" action="/admin/reports/<%= report._id %>/status" class="report-action-form"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><label>Review note<textarea name="resolution" maxlength="2000" placeholder="Record your review or explain the decision"></textarea></label><div class="report-actions"><button class="button button-soft" name="status" value="reviewing" type="submit">Keep in review</button><button class="button button-primary" name="status" value="resolved" type="submit">Resolve report</button><button class="button button-danger-outline" name="status" value="dismissed" type="submit">Dismiss report</button></div><small>Resolution and dismissal require a note. All decisions are recorded with the reviewing administrator.</small></form><% } %>
+      </article>
+    <% }) %>
+    <% if (!reports.length) { %><div class="empty-state"><span class="empty-state-mark">✓</span><h3>All clear in this queue</h3><p>There are no reports with this status.</p></div><% } %>
+  </div>
+  <div class="pagination"><span>Page <%= page %> of <%= pageCount %> · <%= total.toLocaleString("en-NG") %> reports</span><div><% if (page > 1) { %><a class="button button-soft button-small" href="/admin/reports?page=<%= page - 1 %>&amp;status=<%= status %>">Previous</a><% } %><% if (page < pageCount) { %><a class="button button-soft button-small" href="/admin/reports?page=<%= page + 1 %>&amp;status=<%= status %>">Next</a><% } %></div></div>
+</section>
+<%- include("partials/shell-bottom") %>

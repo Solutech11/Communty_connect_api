@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#10271d">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/admin/assets/admin.css">
+</head>
+<body>
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <a class="brand" href="/admin" aria-label="Community Connect Admin home">
+        <img class="brand-logo" src="/admin/assets/community-connect-mark.svg" alt="">
+        <span><strong>Community Connect</strong><small>Admin workspace</small></span>
+      </a>
+      <%- include("navigation", { activeTab, permissions }) %>
+      <div class="sidebar-note"><span class="eyebrow">Protected workspace</span><p>Admin actions are secured with session and CSRF checks.</p></div>
+      <form method="post" action="/admin/logout" class="sign-out-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="button button-ghost" type="submit"><span aria-hidden="true">↗</span> Sign out</button>
+      </form>
+    </aside>
+    <main class="main-content">
+      <header class="mobile-topbar">
+        <a class="brand" href="/admin"><img class="brand-logo" src="/admin/assets/community-connect-mark.svg" alt=""><strong>Community Connect</strong></a>
+        <details class="mobile-drawer"><summary>Menu <span aria-hidden="true">☰</span></summary><%- include("navigation", { activeTab, permissions }) %></details>
+      </header>
+      <header class="page-header">
+        <div><p class="eyebrow"><%= sectionLabel %></p><h1><%= heading %></h1><p class="page-subtitle"><%= subtitle %></p></div>
+        <div class="header-chip"><span class="signal-dot"></span> Secure admin session</div>
+      </header>
+      <% if (message) { %><div class="alert alert-success" role="status"><span>✓</span><%= message %></div><% } %>

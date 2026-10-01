@@ -10,7 +10,6 @@ const logTerminalFallback = (input: { toEmail: string; subject: string; html: st
     operation: "development_email_fallback",
     recipient: "[REDACTED]",
     subject: "[REDACTED]",
-    body: input.html,
     bodyBytes: Buffer.byteLength(input.html, "utf8"),
   }, "Email captured by terminal fallback; content redacted");
 };

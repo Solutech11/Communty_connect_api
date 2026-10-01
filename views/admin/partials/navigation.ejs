@@ -1,0 +1,21 @@
+<nav class="side-nav" aria-label="Admin sections">
+  <a href="/admin" class="<%= activeTab === 'overview' ? 'active' : '' %>" <%= activeTab === 'overview' ? 'aria-current="page"' : '' %>><span class="nav-icon">⌂</span>Overview</a>
+  <% if (permissions.includes("events:moderate")) { %>
+    <a href="/admin/events" class="<%= activeTab === 'moderation' || activeTab === 'events' ? 'active' : '' %>" <%= activeTab === 'moderation' || activeTab === 'events' ? 'aria-current="page"' : '' %>><span class="nav-icon">◷</span>Events</a>
+  <% } %>
+  <% if (permissions.includes("users:read")) { %>
+    <a href="/admin?tab=members" class="<%= activeTab === 'members' ? 'active' : '' %>" <%= activeTab === 'members' ? 'aria-current="page"' : '' %>><span class="nav-icon">♙</span>Members</a>
+  <% } %>
+  <% if (permissions.includes("communities:moderate")) { %>
+    <a href="/admin/communities" class="<%= activeTab === 'communities' ? 'active' : '' %>" <%= activeTab === 'communities' ? 'aria-current="page"' : '' %>><span class="nav-icon">♧</span>Communities</a>
+  <% } %>
+  <% if (permissions.includes("reports:moderate")) { %>
+    <a href="/admin/reports" class="<%= activeTab === 'reports' ? 'active' : '' %>" <%= activeTab === 'reports' ? 'aria-current="page"' : '' %>><span class="nav-icon">⚑</span>Reports</a>
+  <% } %>
+  <% if (permissions.includes("admins:manage")) { %>
+    <a href="/admin?tab=administrators" class="<%= activeTab === 'administrators' ? 'active' : '' %>" <%= activeTab === 'administrators' ? 'aria-current="page"' : '' %>><span class="nav-icon">♧</span>Admin team</a>
+  <% } %>
+  <% if (permissions.includes("earnings:read")) { %>
+    <a href="/admin?tab=finance" class="<%= activeTab === 'finance' ? 'active' : '' %>" <%= activeTab === 'finance' ? 'aria-current="page"' : '' %>><span class="nav-icon">₦</span>Revenue</a>
+  <% } %>
+</nav>

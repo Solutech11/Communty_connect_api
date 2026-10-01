@@ -15,7 +15,7 @@ const communitySlug = (name: string): string => {
 
 export const listCommunities = async (request: Request, response: Response): Promise<Response> => {
   const { page = "1", limit = "20", search, category, state, lga } = request.query as Record<string, string>;
-  const query: Record<string, unknown> = { visibility: "public" };
+  const query: Record<string, unknown> = { visibility: "public", isActive: { $ne: false } };
 
   if (search) {
     query.$text = { $search: search };
@@ -53,6 +53,7 @@ export const getCommunity = async (request: Request, response: Response): Promis
   if (!community) {
     throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
   }
+  if (community.isActive === false) throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
 
   const userId = request.auth?.id;
   const canViewPrivate = Boolean(
@@ -117,6 +118,7 @@ export const resolveCommunityCode = async (request: Request, response: Response)
   const codeHash = communityCodeLookupHash(request.body.accessCode as string);
   const community = await CommunityModel.findOne({
     visibility: "private",
+    isActive: { $ne: false },
     joinPolicy: { $in: ["access_code", "approval", "open"] },
     accessCodeLookupHash: codeHash,
   }).select("+accessCodeHash");
@@ -140,7 +142,7 @@ export const updateCommunity = async (request: Request, response: Response): Pro
     ...communityInput,
     ...(accessCode ? { accessCodeHash: await bcrypt.hash(accessCode, 12), accessCodeLookupHash: communityCodeLookupHash(accessCode) } : {}),
   };
-  const existing = await CommunityModel.findOne({ _id: request.params.id as string, ownerId: request.auth?.id });
+  const existing = await CommunityModel.findOne({ _id: request.params.id as string, ownerId: request.auth?.id, isActive: { $ne: false } });
   if (!existing) throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
   const nextType = communityInput.membershipType || existing.membershipType;
   const nextVisibility = communityInput.visibility || existing.visibility;
@@ -178,6 +180,7 @@ export const updateCommunity = async (request: Request, response: Response): Pro
 export const joinCommunity = async (request: Request, response: Response): Promise<Response> => {
   const community = await CommunityModel.findOne({
     _id: request.params.id as string,
+    isActive: { $ne: false },
     visibility: "public",
     membershipType: "free",
     joinPolicy: "open",
@@ -214,6 +217,7 @@ export const leaveCommunity = async (request: Request, response: Response): Prom
 export const listMembers = async (request: Request, response: Response): Promise<Response> => {
   const community = await CommunityModel.findOne({
     _id: request.params.id as string,
+    isActive: { $ne: false },
     $or: [
       { visibility: "public" },
       { ownerId: request.auth?.id },

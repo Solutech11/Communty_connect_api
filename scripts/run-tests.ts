@@ -6,6 +6,8 @@ const testFiles = [
   "tests/check-in-window.test.ts",
   "tests/api-gap-contracts.test.ts",
   "tests/charges.test.ts",
+  "tests/wallet-payout.test.ts",
+  "tests/bank-account.test.ts",
   "tests/crypto.test.ts",
   "tests/docs.test.ts",
   "tests/recommendation.test.ts",

@@ -29,6 +29,7 @@ const bankAccountSchema = new Schema(
 );
 
 bankAccountSchema.index({ userId: 1, accountFingerprint: 1 }, { unique: true });
+bankAccountSchema.index({ userId: 1, active: 1, isDefault: -1, createdAt: 1, _id: 1 });
 
 export type BankAccount = InferSchemaType<typeof bankAccountSchema>;
 export const BankAccountModel =

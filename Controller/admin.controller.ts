@@ -185,6 +185,18 @@ export const renderAdminDashboard = async (
   request: Request,
   response: Response,
 ): Promise<void> => {
+  const tabValues = ["overview", "moderation", "members", "administrators", "finance"] as const;
+  const requestedTab = typeof request.query.tab === "string" ? request.query.tab : "overview";
+  const activeTab = tabValues.includes(requestedTab as typeof tabValues[number])
+    ? requestedTab as typeof tabValues[number]
+    : "overview";
+  const tabDetails = {
+    overview: { label: "Community Connect", heading: "Operations overview", subtitle: "A calm view of platform activity and the work that needs attention." },
+    moderation: { label: "Event workspace", heading: "Event moderation", subtitle: "Review new listings and open complete event and ticket records." },
+    members: { label: "Member workspace", heading: "Member accounts", subtitle: "Help members and respond to account activity." },
+    administrators: { label: "Access workspace", heading: "Administrator team", subtitle: "Manage access for trusted platform operators." },
+    finance: { label: "Finance workspace", heading: "Platform revenue", subtitle: "Review completed platform charges and proceeds." },
+  }[activeTab];
   const [
     users,
     events,
@@ -240,6 +252,8 @@ export const renderAdminDashboard = async (
 
   response.render("admin/dashboard", {
     title: "Community Connect Admin",
+    activeTab,
+    tabDetails,
     csrfToken: request.admin?.csrfToken,
     permissions: request.admin?.permissions || [],
     users,
@@ -398,7 +412,7 @@ export const approveEventFromAdmin = async (
   event.publishedAt = new Date();
   event.deactivationReason = undefined;
   await event.save();
-  redirectWithMessage(response, "Event approved and published.");
+  response.redirect(`/admin/events/${event._id}?message=${encodeURIComponent("Event approved and published.")}`);
 };
 
 export const deactivateEventFromAdmin = async (
@@ -433,5 +447,5 @@ export const deactivateEventFromAdmin = async (
     throw new AppError(404, "Published event was not found", "EVENT_NOT_FOUND");
   }
 
-  redirectWithMessage(response, "Event deactivated.");
+  response.redirect(`/admin/events/${event._id}?message=${encodeURIComponent("Event deactivated.")}`);
 };

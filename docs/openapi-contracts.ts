@@ -203,6 +203,42 @@ const checkInPreviewDataSchema: OpenApiSchema = {
 };
 
 export const ticketResponseSchemaContracts: Record<string, Record<string, OpenApiSchema>> = {
+  "GET /wallet": {
+    "data": {
+      type: "object", additionalProperties: false, required: ["wallet", "payout"],
+      properties: { wallet: { type: "object" }, payout: { type: "object" } },
+    },
+    "data.wallet": {
+      type: "object", additionalProperties: false,
+      required: ["_id", "walletNumber", "currency", "availableBalanceKobo", "pendingBalanceKobo", "status"],
+      properties: {
+        _id: objectIdResponseSchema, walletNumber: { type: "string" },
+        currency: { type: "string", enum: ["NGN"] },
+        availableBalanceKobo: { type: "integer", minimum: 0 },
+        pendingBalanceKobo: { type: "integer", minimum: 0 },
+        status: { type: "string", enum: ["active", "frozen", "closed"] },
+      },
+    },
+    "data.payout": {
+    type: "object", additionalProperties: false,
+    required: ["automatic", "minimumAmountKobo", "timezone", "serverTime", "nextPayoutAt", "status", "bankAccount"],
+    properties: {
+      automatic: { type: "boolean", enum: [true] },
+      minimumAmountKobo: { type: "integer", enum: [100000], description: "Minimum available balance for automatic payout: NGN 1,000. Smaller balances accumulate until eligible." },
+      timezone: { type: "string", enum: ["Africa/Lagos"] },
+      serverTime: dateTimeResponseSchema,
+      nextPayoutAt: { ...dateTimeResponseSchema, description: "Next midnight in Africa/Lagos. Subtract serverTime for a clock-independent countdown. Transfers settle asynchronously." },
+      status: { type: "string", enum: ["paused", "bank_required", "processing", "below_minimum", "scheduled", "empty"] },
+      bankAccount: {
+        type: "object", nullable: true, additionalProperties: false,
+        required: ["_id", "bankName", "accountName", "maskedAccountNumber"],
+        properties: {
+          _id: objectIdResponseSchema, bankName: { type: "string" },
+          accountName: { type: "string" }, maskedAccountNumber: { type: "string" },
+        },
+      },
+    },
+  } },
   "GET /communities/{id}": { "data.community.ownerId": strictObject({
     _id: objectIdResponseSchema,
     firstName: { type: "string" },
@@ -1008,10 +1044,8 @@ export const requestBodyContracts: Record<string, RequestBodyContract> = {
   "POST /disputes/{id}/messages": jsonBody({ message: "The ticket is still unavailable in my account.", attachments: ["https://res.cloudinary.com/example/receipt.webp"], internal: false }, ["message"]),
   "PATCH /disputes/{id}/status": jsonBody({ status: "resolved", resolution: "Payment reconciled and the ticket was issued." }, ["status"]),
 
-  "POST /wallet/topups": jsonBody({ amountKobo: 100000 }, ["amountKobo"], "Requested wallet credit in integer kobo; the configured deposit fee is added to the Paystack amount."),
+  "POST /wallet/bank-accounts/resolve": jsonBody({ accountNumber: "0123456789", bankCode: "058" }, ["accountNumber", "bankCode"]),
   "POST /wallet/bank-accounts": jsonBody({ accountNumber: "0123456789", bankCode: "058" }, ["accountNumber", "bankCode"]),
-  "POST /wallet/transfers": jsonBody({ recipient: "recipient@example.com", amountKobo: 50000, note: "Shared event costs" }, ["recipient", "amountKobo"]),
-  "POST /wallet/withdrawals": jsonBody({ bankAccountId: id, amountKobo: 100000 }, ["bankAccountId", "amountKobo"], "The configured withdrawal fee is deducted from amountKobo before Paystack payout."),
   "POST /wallet/withdrawals/{reference}/finalize": jsonBody({ otp: "123456" }, ["otp"]),
 
   "POST /uploads/files": {
@@ -1492,22 +1526,14 @@ export const requestBodySchemaContracts: Record<string, OpenApiSchema> = {
     resolution: { type: "string", maxLength: 3000 },
   }, ["status"]),
 
-  "POST /wallet/topups": strictObject({
-    amountKobo: { type: "integer", exclusiveMinimum: 0, maximum: 10_000_000_000 },
-  }, ["amountKobo"]),
+  "POST /wallet/bank-accounts/resolve": strictObject({
+    accountNumber: { type: "string", pattern: "^\\d{10}$" },
+    bankCode: { type: "string", pattern: "^\\d{3,6}$" },
+  }, ["accountNumber", "bankCode"]),
   "POST /wallet/bank-accounts": strictObject({
     accountNumber: { type: "string", pattern: "^\\d{10}$", minLength: 10, maxLength: 10 },
     bankCode: { type: "string", pattern: "^\\d{3,6}$", minLength: 3, maxLength: 6 },
   }, ["accountNumber", "bankCode"]),
-  "POST /wallet/transfers": strictObject({
-    recipient: { type: "string", minLength: 3, maxLength: 254 },
-    amountKobo: { type: "integer", exclusiveMinimum: 0, maximum: 10_000_000_000 },
-    note: { type: "string", maxLength: 200 },
-  }, ["recipient", "amountKobo"]),
-  "POST /wallet/withdrawals": strictObject({
-    bankAccountId: objectIdResponseSchema,
-    amountKobo: { type: "integer", exclusiveMinimum: 0, maximum: 10_000_000_000 },
-  }, ["bankAccountId", "amountKobo"]),
   "POST /wallet/withdrawals/{reference}/finalize": strictObject({
     otp: { type: "string", pattern: "^\\d{6}$", minLength: 6, maxLength: 6 },
   }, ["otp"]),
@@ -1835,17 +1861,15 @@ export const successContracts: Record<string, SuccessContract> = {
   "POST /disputes/{id}/messages": ok("Dispute reply added", { dispute: { ...dispute, messages: [disputeMessage] } }, 201),
   "PATCH /disputes/{id}/status": ok("Dispute status updated", { dispute: { ...dispute, status: "resolved", resolution: "Payment reconciled and the ticket was issued." } }),
 
-  "GET /wallet": ok("Wallet retrieved", { wallet }),
+  "GET /wallet": ok("Wallet retrieved", { wallet, payout: { automatic: true, minimumAmountKobo: 100000, timezone: "Africa/Lagos", serverTime: createdAt, nextPayoutAt: "2026-10-01T23:00:00.000Z", status: "scheduled", bankAccount: { _id: id, bankName: "Guaranty Trust Bank", accountName: "ADA OKAFOR", maskedAccountNumber: "******6789" } } }),
   "GET /wallet/transactions": ok("Transactions retrieved", { transactions: [transaction], pagination: { page: 1, limit: 20, total: 1 } }),
   "GET /wallet/transactions/{id}": ok("Transaction retrieved", { transaction }),
-  "POST /wallet/topups": ok("Top-up initialized", { transaction, authorizationUrl: "https://checkout.paystack.com/example", accessCode: "example_access_code", reference: transaction.reference, publicKey: "pk_test_example", charge: { walletCreditKobo: 100000, feeKobo: 1000, totalPayableKobo: 101000 } }, 201),
   "GET /wallet/topups/{reference}/verify": ok("Top-up verified", { transaction: { ...transaction, status: "successful", completedAt: createdAt } }),
   "GET /wallet/banks": ok("Banks retrieved", { banks: [{ name: "Guaranty Trust Bank", code: "058", active: true, country: "Nigeria", currency: "NGN" }] }),
   "GET /wallet/bank-accounts": ok("Bank accounts retrieved", { bankAccounts: [{ _id: id, bankName: "Guaranty Trust Bank", bankCode: "058", accountName: "ADA OKAFOR", maskedAccountNumber: "******6789", active: true }] }),
+  "POST /wallet/bank-accounts/resolve": ok("Bank account resolved", { resolution: { bankCode: "058", bankName: "Guaranty Trust Bank", accountName: "ADA OKAFOR", maskedAccountNumber: "******6789" } }),
   "POST /wallet/bank-accounts": ok("Bank account saved", { bankAccount: { _id: id, bankName: "Guaranty Trust Bank", bankCode: "058", accountName: "ADA OKAFOR", maskedAccountNumber: "******6789", active: true } }, 201),
   "DELETE /wallet/bank-accounts/{id}": ok("Bank account removed"),
-  "POST /wallet/transfers": ok("Transfer completed", { transaction: { ...transaction, reference: "transfer_550e8400-e29b-41d4-a716-446655440000", type: "internal_transfer", direction: "debit", amountKobo: 50000, feeKobo: 0, status: "successful" } }, 201),
-  "POST /wallet/withdrawals": ok("Withdrawal submitted", { transaction: { ...transaction, reference: "withdrawal_550e8400-e29b-41d4-a716-446655440000", type: "withdrawal", direction: "debit", amountKobo: 100000, feeKobo: 1000, status: "processing" }, charge: { withdrawalAmountKobo: 100000, feeKobo: 1000, payoutAmountKobo: 99000 } }, 202),
   "POST /wallet/withdrawals/{reference}/finalize": ok("Withdrawal OTP accepted", { transaction: { ...transaction, type: "withdrawal", status: "processing" } }, 202),
 
   "POST /uploads/files": ok("Community file uploaded", { attachment: { _id: id, url: "https://res.cloudinary.com/example/raw/upload/community-chat/example.pdf", type: "pdf", name: "meeting-notes.pdf", mimeType: "application/pdf", sizeBytes: 184320, thumbnailUrl: null } }, 201),

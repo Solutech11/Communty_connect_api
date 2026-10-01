@@ -25,6 +25,8 @@ const membershipOrderNumber = (): string => {
   return `CCM-${Date.now()}-${randomUUID().slice(0, 8).toUpperCase()}`;
 };
 
+import { walletCreditUpdate } from "../utils/walletCredit.utils";
+
 export const createCommunityMembershipOrder = async (
   request: Request,
   response: Response,
@@ -51,7 +53,11 @@ export const createCommunityMembershipOrder = async (
       });
     }
 
-    const community = await CommunityModel.findOne({ _id: request.params.id as string, membershipType: "premium" });
+    const community = await CommunityModel.findOne({
+      _id: request.params.id as string,
+      membershipType: "premium",
+      isActive: { $ne: false },
+    });
 
     if (!community) {
       throw new AppError(404, "Premium community was not found", "PREMIUM_COMMUNITY_NOT_FOUND");
@@ -222,8 +228,8 @@ export const completeCommunityMembershipOrder = async (
 
       const ownerWallet = await WalletModel.findOneAndUpdate(
         { userId: order.ownerId, status: "active" },
-        { $inc: { availableBalanceKobo: order.ownerProceedsKobo } },
-        { new: true, session },
+        walletCreditUpdate(order.ownerProceedsKobo),
+        { new: true, session, updatePipeline: true },
       );
 
       if (!ownerWallet) {

@@ -35,6 +35,8 @@ import { formatNaira, sendPaymentReceiptEmail } from "../utils/paymentEmail.util
 
 const orderNumber = (): string => `CC-${Date.now()}-${randomUUID().slice(0, 8).toUpperCase()}`;
 const paymentReference = (): string => `ticket_${randomUUID()}`.toLowerCase();
+import { walletCreditUpdate } from "../utils/walletCredit.utils";
+
 export const webCallbackUrl = (number: string): string => {
   const base = env.WEB_BASE_URL || (!env.isProduction ? "http://localhost:5173" : "");
   if (!base) throw new AppError(503, "Web checkout is unavailable", "WEB_CHECKOUT_UNAVAILABLE");
@@ -328,8 +330,8 @@ export const completeTicketOrder = async (
       if (organizerProceedsKobo > 0) {
         const organizerWallet = await WalletModel.findOneAndUpdate(
           { userId: event.creatorId, status: "active" },
-          { $inc: { availableBalanceKobo: organizerProceedsKobo } },
-          { new: true, session },
+          walletCreditUpdate(organizerProceedsKobo),
+          { new: true, session, updatePipeline: true },
         );
 
         if (!organizerWallet) {

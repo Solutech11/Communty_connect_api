@@ -9,10 +9,9 @@ import {
   sha256,
 } from "../utils/crypto.utils";
 import {
-  completeWithdrawal,
   creditVerifiedTopup,
-  refundWithdrawal,
 } from "./wallet.controller";
+import { completeWithdrawal, refundWithdrawal } from "../utils/walletSettlement.utils";
 import { completeTicketOrder } from "./ticket.controller";
 import { completeCommunityMembershipOrder } from "./communityPayment.controller";
 import { recordTicketRefundWebhook } from "../utils/ticketPayment.utils";
@@ -27,6 +26,7 @@ const paystackWebhookSchema = z.object({
     fees: z.number().int().nonnegative().nullable().optional(),
     status: z.string().max(60).optional(),
     transfer_code: z.string().max(100).optional(),
+    currency: z.string().length(3).optional(),
   }).passthrough(),
 }).passthrough();
 
@@ -145,12 +145,18 @@ export const paystackWebhook = async (request: Request, response: Response): Pro
         payload.data.status || payload.event.slice("refund.".length),
       );
     } else if (payload.event === "transfer.success" && reference) {
-      await completeWithdrawal(reference);
+      if (payload.data.amount === undefined || !payload.data.currency) {
+        throw new AppError(400, "Webhook payout amount and currency are required", "WEBHOOK_AMOUNT_REQUIRED");
+      }
+      await completeWithdrawal(reference, payload.data.amount, payload.data.currency);
     } else if (
       ["transfer.failed", "transfer.reversed"].includes(payload.event) &&
       reference
     ) {
-      await refundWithdrawal(reference, payload.event);
+      if (payload.data.amount === undefined || !payload.data.currency) {
+        throw new AppError(400, "Webhook payout amount and currency are required", "WEBHOOK_AMOUNT_REQUIRED");
+      }
+      await refundWithdrawal(reference, payload.event, payload.data.amount, payload.data.currency);
     }
 
     await WebhookEventModel.updateOne(

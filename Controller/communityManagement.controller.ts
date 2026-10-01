@@ -85,7 +85,10 @@ const syncLegacyMembershipArrays = async (
 
 export const listMyCommunities = async (request: Request, response: Response): Promise<Response> => {
   // Mirror legacy member arrays once so existing communities appear in the new membership-backed screen.
-  const legacyCommunities = await CommunityModel.find({ $or: [{ ownerId: request.auth?.id }, { members: request.auth?.id }, { moderators: request.auth?.id }] });
+  const legacyCommunities = await CommunityModel.find({
+    isActive: { $ne: false },
+    $or: [{ ownerId: request.auth?.id }, { members: request.auth?.id }, { moderators: request.auth?.id }],
+  });
   await Promise.all(legacyCommunities.map(ensureCommunityMemberRecords));
   const page = Number(request.query.page || 1);
   const limit = Number(request.query.limit || 20);
@@ -115,10 +118,11 @@ export const listMyCommunities = async (request: Request, response: Response): P
       visibility: string;
       membershipType: string;
       membershipPriceKobo: number;
+      isActive?: boolean;
       lastActivityAt?: Date;
       createdAt: Date;
     } | null;
-    if (!community) return null;
+    if (!community || community.isActive === false) return null;
     if (community.membershipType === "premium" && membership.status === "active"
       && community.ownerId.toString() !== request.auth?.id && !paidCommunityIds.has(community._id.toString())) return null;
 
@@ -188,7 +192,7 @@ export const getCommunityRules = async (request: Request, response: Response): P
     ? await getCommunityAndMembership(request.params.id as string, userId)
     : { community: await CommunityModel.findById(request.params.id as string), membership: null };
   const community = result.community;
-  if (!community || (community.visibility === "private" && result.membership?.status !== "active")) {
+  if (!community || community.isActive === false || (community.visibility === "private" && result.membership?.status !== "active")) {
     throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
   }
 

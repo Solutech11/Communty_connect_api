@@ -4,6 +4,8 @@ export const ADMIN_PERMISSIONS = [
   "users:read",
   "users:moderate",
   "events:moderate",
+  "communities:moderate",
+  "reports:moderate",
   "earnings:read",
   "admins:manage",
 ] as const;

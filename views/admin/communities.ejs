@@ -1,0 +1,21 @@
+<%- include("partials/shell-top", {
+  title,
+  csrfToken,
+  permissions,
+  activeTab,
+  sectionLabel: "Community operations",
+  heading: "Communities",
+  subtitle: "Understand how each community is set up and manage its platform access.",
+  message,
+}) %>
+
+<section class="stats-grid stats-grid-compact"><article class="stat-card"><span>Active communities</span><strong><%= activeCount.toLocaleString("en-NG") %></strong><small>Available in discovery</small></article><article class="stat-card"><span>Deactivated</span><strong><%= deactivatedCount.toLocaleString("en-NG") %></strong><small>Restricted by an administrator</small></article><article class="stat-card"><span>Current results</span><strong><%= total.toLocaleString("en-NG") %></strong><small><%= selectedStatus %> communities</small></article><article class="stat-card stat-accent"><span>Moderation tools</span><strong>Community</strong><small>Review details and membership</small></article></section>
+
+<section class="panel"><div class="panel-heading panel-heading-filter"><div><p class="eyebrow">Community directory</p><h2>Find a community</h2><p>Open a profile for its owner, membership, content, and membership orders.</p></div><form method="get" action="/admin/communities" class="filter-form"><label>Search<input name="search" maxlength="80" value="<%= search %>" placeholder="Name, slug, category"></label><label>Status<select name="status"><option value="active" <%= selectedStatus === "active" ? "selected" : "" %>>Active</option><option value="deactivated" <%= selectedStatus === "deactivated" ? "selected" : "" %>>Deactivated</option></select></label><button class="button button-primary" type="submit">Apply filters</button></form></div>
+  <div class="table-wrap"><table><thead><tr><th>Community</th><th>Owner</th><th>Category and location</th><th>Membership</th><th>Access</th><th>Created</th><th></th></tr></thead><tbody>
+    <% communities.forEach((community) => { const owner = community.ownerId || {}; const isActive = community.isActive !== false; %><tr><td><div class="event-cell"><% if (community.avatarImageUrl || community.imageUrl) { %><img src="<%= community.avatarImageUrl || community.imageUrl %>" alt="" loading="lazy"><% } else { %><span class="community-avatar"><%= community.name.charAt(0).toUpperCase() %></span><% } %><div><strong><%= community.name %></strong><small><%= community.slug %></small></div></div></td><td><%= owner.firstName || "Unknown" %> <%= owner.lastName || "" %></td><td><%= community.category %><small><%= community.lga || "" %><%= community.lga && community.state ? ", " : "" %><%= community.state || "Location not set" %></small></td><td><%= community.membershipType %><small><%= community.membershipType === "premium" ? "₦" + (community.membershipPriceKobo / 100).toLocaleString("en-NG") : "Free to join" %></small></td><td><span class="status <%= isActive ? 'status-active' : 'status-deactivated' %>"><%= isActive ? "active" : "deactivated" %></span><small><%= community.visibility %></small></td><td><%= new Date(community.createdAt).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" }) %></td><td><a class="button button-soft button-small" href="/admin/communities/<%= community._id %>">View community <span aria-hidden="true">↗</span></a></td></tr><% }) %>
+    <% if (!communities.length) { %><tr><td colspan="7" class="empty">No communities match these filters.</td></tr><% } %>
+  </tbody></table></div>
+  <div class="pagination"><span>Page <%= page %> of <%= pageCount %> · <%= total.toLocaleString("en-NG") %> communities</span><div><% if (page > 1) { %><a class="button button-soft button-small" href="/admin/communities?page=<%= page - 1 %>&amp;status=<%= selectedStatus %>&amp;search=<%= encodeURIComponent(search) %>">Previous</a><% } %><% if (page < pageCount) { %><a class="button button-soft button-small" href="/admin/communities?page=<%= page + 1 %>&amp;status=<%= selectedStatus %>&amp;search=<%= encodeURIComponent(search) %>">Next</a><% } %></div></div>
+</section>
+<%- include("partials/shell-bottom") %>

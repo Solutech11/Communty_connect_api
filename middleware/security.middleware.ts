@@ -145,6 +145,18 @@ export const communityCodeRateLimiter = rateLimit({
   },
 });
 
+export const bankAccountResolutionRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  store: rateLimitStore("rl:bank-resolution:"),
+  keyGenerator: (request) => `user:${request.auth!.id}`,
+  handler: (_request, _response, next) => {
+    next(new AppError(429, "Too many account verification requests. Try again later.", "RATE_LIMIT_EXCEEDED"));
+  },
+});
+
 export const requestSlowdown = slowDown({
   windowMs: 60 * 1000,
   delayAfter: 100,
