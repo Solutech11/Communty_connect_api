@@ -309,7 +309,7 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 | `socket:ready` | Server -> client | Confirms authenticated user room |
 | `join-chat` / `conversation:join` | Client -> server | Database participant check before room join |
 | `leave-chat` / `conversation:leave` | Client -> server | Leaves a conversation room |
-| `message:new` | Server -> room | Emitted after REST message persistence |
+| `message:new` | Server -> participants | Emitted once per socket to the conversation room and authenticated participant user rooms after REST persistence |
 | `conversation:read` | Server -> room | Emitted after REST read persistence |
 | `typing:start` / `typing:stop` | Bidirectional | Ephemeral typing state; messages still use REST |
 | `community:join` / `community:leave` | Client -> server | Verifies active membership before room join; returns structured acknowledgement |
@@ -317,6 +317,24 @@ Connect to the `/chat` namespace with the access JWT in `handshake.auth.token` (
 | `community:message:new` / `community:message:updated` / `community:message:deleted` | Server -> room | Realtime community chat persistence events |
 | `community:post:new` / `community:announcement:new` / `community:member:updated` | Server -> room | Realtime community content and membership events |
 | `community:call:started` / `community:call:updated` / `community:call:ended` | Server -> room | Community voice/video call lifecycle events |
+
+Clients should wait for the `conversation:join` boolean acknowledgement, rejoin
+on reconnect or screen focus, and fetch recent history after joining to recover
+missed messages. Read-receipt failure must not prevent joining. If the mobile
+socket URL is omitted, it is derived from the configured REST host. Read events
+include `readAt` as an ISO timestamp. Socket.IO delivery requires an active app
+connection; persisted history remains available after disconnects.
+
+The mobile client starts with HTTP polling, upgrades to WebSocket when available,
+and tries the alternate transport if the first fails. Startup logs include
+`Socket.IO chat gateway initialized`; transport handshake failures log their
+Engine.IO error code without request headers or tokens.
+
+Android adds an `Origin` header matching the Socket.IO host to WebSocket requests.
+For local devices, include that LAN origin (for example,
+`http://192.168.1.10:5000`) in `FRONTEND_URLS` if it differs from `APP_BASE_URL`.
+Restart the backend after changing these environment settings. An omitted origin
+is supported for native clients; an explicit origin must pass the allowlist.
 
 ## Admin Portal and Platform Charges
 

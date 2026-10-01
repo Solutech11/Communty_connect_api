@@ -42,7 +42,7 @@ const envSchema = z.object({
   CLOUDINARY_API_KEY: z.string().min(1),
   CLOUDINARY_API_SECRET: z.string().min(1),
   ZEPTOMAIL_API_URL: z.string().url().default("https://api.zeptomail.com/v1.1/email"),
-  ZEPTOMAIL_SEND_MAIL_TOKEN: z.string().min(1),
+  ZEPTOMAIL_SEND_MAIL_TOKEN: z.string().default(""),
   MAIL_FROM_ADDRESS: z.string().email(),
   MAIL_FROM_NAME: z.string().min(1).default("Community Connect"),
   GROQ_API_KEY: z.string().min(1),
@@ -82,6 +82,10 @@ if (parsed.data.NODE_ENV === "production") {
     throw new Error("EVENT_AUTO_APPROVE_FOR_TESTING cannot be enabled in production.");
   }
 
+  if (!parsed.data.ZEPTOMAIL_SEND_MAIL_TOKEN) {
+    throw new Error("ZEPTOMAIL_SEND_MAIL_TOKEN is required in production.");
+  }
+
   const unsafePlaceholders = [
     parsed.data.JWT_ACCESS_SECRET,
     parsed.data.JWT_REFRESH_SECRET,
@@ -108,6 +112,8 @@ export const env = {
   ...parsed.data,
   // The server-rendered admin portal posts back to APP_BASE_URL. Include that
   // same origin so CORS does not reject its browser form submissions.
+  // Android WebSockets send the socket host as Origin; include the development
+  // LAN origin in FRONTEND_URLS when it differs from APP_BASE_URL.
   allowedOrigins: [...new Set([...configuredBrowserOrigins, appOrigin, ...(websiteOrigin ? [websiteOrigin] : [])])],
   isProduction: parsed.data.NODE_ENV === "production",
   isTest: parsed.data.NODE_ENV === "test",

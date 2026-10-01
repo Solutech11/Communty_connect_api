@@ -4,7 +4,7 @@ import { FriendshipModel } from "../models/Social/Friendship.model";
 import { UserModel } from "../models/Auth/User.model";
 import { AppError } from "../utils/AppError";
 import { sendSuccess } from "../utils/response.utils";
-import { createNotification } from "../utils/notificationService.utils";
+import { createAppAndEmailNotification } from "../utils/notificationService.utils";
 import { blockedUserIds, requireUnblocked, withUserLocks } from "../utils/userBlock.utils";
 
 const pairKeyFor = (left: string, right: string): string => [left, right].sort().join(":");
@@ -130,7 +130,7 @@ export const sendFriendRequest = async (request: Request, response: Response): P
       $unset: { respondedAt: 1 }, $setOnInsert: { pairKey },
     }, { upsert: true, new: true });
   });
-  if (friendship!.status === "pending" && friendship!.requesterId.toString() === request.auth!.id) void createNotification({
+  if (friendship!.status === "pending" && friendship!.requesterId.toString() === request.auth!.id) void createAppAndEmailNotification({
     userId: friendship!.addresseeId.toString(),
     type: "connection_request",
     title: "New connection request",
@@ -162,13 +162,22 @@ export const respondToFriendRequest = async (
   }
 
   if (status === "accepted") {
-    void createNotification({
+    void createAppAndEmailNotification({
       userId: friendship.requesterId.toString(),
       type: "connection_accepted",
       title: "Connection request accepted",
       body: "You have a new Community Connect friend.",
       data: { friendshipId: friendship._id.toString(), route: "Friends" },
       dedupeKey: `friend-accepted:${friendship._id.toString()}`,
+    });
+  } else {
+    void createAppAndEmailNotification({
+      userId: friendship.requesterId.toString(),
+      type: "connection_declined",
+      title: "Connection request declined",
+      body: "Your connection request was declined.",
+      data: { route: "Friends" },
+      dedupeKey: `friend-declined:${friendship._id.toString()}`,
     });
   }
 

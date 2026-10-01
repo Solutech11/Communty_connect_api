@@ -15,7 +15,7 @@ import { withRedisLock } from "../utils/redisLock.utils";
 import { ensureDirectConversation } from "../utils/directConversation.utils";
 import { closeRoommateConnection } from "../utils/roommateLifecycle.utils";
 import { contactFingerprint, contactExchangeAllowed } from "../utils/roommateContacts.utils";
-import { createNotification } from "../utils/notificationService.utils";
+import { createAppAndEmailNotification } from "../utils/notificationService.utils";
 
 const me = (request: Request): string => request.auth!.id;
 const changed = (request: Request, ids: string[]): void => {
@@ -199,7 +199,7 @@ export const decideRoommate = async (request: Request, response: Response): Prom
     })));
   if (connectionId) {
     changed(request, [userId, targetId]);
-    for (const id of [userId, targetId]) void createNotification({
+    for (const id of [userId, targetId]) void createAppAndEmailNotification({
       userId: id, type: "roommate_match", title: "New roommate connect",
       body: "You both liked each other. Start a conversation.",
       data: { route: "RoommateConnection", connectionId }, dedupeKey: `roommate-match:${connectionId}:${id}`,
@@ -237,36 +237,58 @@ export const endRoommateConnection = async (request: Request, response: Response
     await closeRoommateConnection(connection._id.toString(), session);
   }));
   changed(request, [me(request), otherId]);
+  void createAppAndEmailNotification({
+    userId: otherId, type: "roommate_connection_ended", title: "Roommate connect ended",
+    body: "Your roommate connect has ended. Your profile is paused until you choose to resume.",
+    data: { route: "RoommateConnection", connectionId: connection._id.toString() },
+    dedupeKey: `roommate-ended:${connection._id}:${Date.now()}`,
+  });
   return sendSuccess(response, 200, "Roommate connect ended", { ended: true });
 };
 
 export const saveRoommateConsent = async (request: Request, response: Response): Promise<Response> => {
   const userId = me(request);
   const { otherId } = await requireUsable(request.params.id as string, userId);
-  await withUserLocks([userId, otherId], async () => {
+  const consentChanged = await withUserLocks([userId, otherId], async () => {
     const { connection } = await requireUsable(request.params.id as string, userId);
     const user = await UserModel.findById(userId).select("phone email").lean();
     const fields = request.body.fields as string[];
     if (!user || (fields.includes("phone") && !user.phone)) {
       throw new AppError(422, "Add a phone number to your profile before sharing it", "CONTACT_UNAVAILABLE");
     }
+    const existing = connection.consents.find((consent) => consent.userId.toString() === userId);
+    if (existing && [...existing.fields].sort().join(",") === [...fields].sort().join(",")) return false;
     connection.set("consents", connection.consents.filter((consent) => consent.userId.toString() !== userId));
     connection.consents.push({ userId: new mongoose.Types.ObjectId(userId), fields, contactFingerprint: contactFingerprint(user, fields) });
     await connection.save();
+    return true;
   });
   changed(request, [userId, otherId]);
+  if (consentChanged) void createAppAndEmailNotification({
+    userId: otherId, type: "roommate_contact_consent", title: "Contact-sharing consent updated",
+    body: "Your roommate connect updated contact-sharing consent. Open the app to review what is available.",
+    data: { route: "RoommateConnection", connectionId: request.params.id },
+    dedupeKey: `roommate-consent:${request.params.id}:${userId}:${new mongoose.Types.ObjectId().toHexString()}`,
+  });
   return sendSuccess(response, 200, "Contact consent saved", { consented: true });
 };
 
 export const revokeRoommateConsent = async (request: Request, response: Response): Promise<Response> => {
   const userId = me(request);
   const { otherId } = await requireConnection(request.params.id as string, userId);
-  await withUserLocks([userId, otherId], async () => {
-    await RoommateConnectionModel.updateOne({ _id: request.params.id, participantIds: userId }, {
+  const revoked = await withUserLocks([userId, otherId], async () => {
+    const result = await RoommateConnectionModel.updateOne({ _id: request.params.id, participantIds: userId }, {
       $pull: { consents: { userId } },
     });
+    return result.modifiedCount > 0;
   });
   changed(request, [userId, otherId]);
+  if (revoked) void createAppAndEmailNotification({
+    userId: otherId, type: "roommate_contact_consent_revoked", title: "Contact sharing revoked",
+    body: "Your roommate connect revoked contact-sharing consent.",
+    data: { route: "RoommateConnection", connectionId: request.params.id },
+    dedupeKey: `roommate-consent-revoked:${request.params.id}:${userId}:${new mongoose.Types.ObjectId().toHexString()}`,
+  });
   return sendSuccess(response, 200, "Contact sharing revoked", { consented: false });
 };
 
@@ -302,7 +324,7 @@ export const requestRoommatePairing = async (request: Request, response: Respons
     const [created] = await RoommateRequestModel.create([{ connectionId: connection._id, requesterId: userId, recipientId: otherId }], { session });
     return created!;
   }));
-  void createNotification({ userId: pairingRequest.recipientId.toString(), type: "roommate_request",
+  void createAppAndEmailNotification({ userId: pairingRequest.recipientId.toString(), type: "roommate_request",
     title: "Roommate request", body: "A connect would like to become your roommate.",
     data: { route: "RoommateConnection", connectionId: request.params.id }, dedupeKey: `roommate-request:${pairingRequest._id}` });
   changed(request, [userId, otherId]);
@@ -314,13 +336,13 @@ export const respondRoommatePairing = async (request: Request, response: Respons
   const { otherId } = await requireConnection(request.params.id as string, userId);
   const action = request.body.action as "accept" | "decline" | "cancel";
   const status = action === "accept" ? "accepted" : action === "decline" ? "declined" : "cancelled";
-  await withUserLocks([userId, otherId], () => mongoose.connection.transaction(async (session) => {
+  const notifyPeer = await withUserLocks([userId, otherId], () => mongoose.connection.transaction(async (session) => {
     await requireUnblocked(userId, otherId, session);
     const pairingRequest = await RoommateRequestModel.findOne({ _id: request.params.requestId, connectionId: request.params.id }).session(session);
     if (!pairingRequest) throw new AppError(404, "Roommate request was not found", "ROOMMATE_REQUEST_NOT_FOUND");
     const expectedUser = action === "cancel" ? pairingRequest.requesterId : pairingRequest.recipientId;
     if (expectedUser.toString() !== userId) throw new AppError(403, "This action is unavailable", "FORBIDDEN");
-    if (pairingRequest.status === status) return;
+    if (pairingRequest.status === status) return false;
     if (pairingRequest.status !== "pending") throw new AppError(409, "This request is no longer pending", "ROOMMATE_REQUEST_CLOSED");
     if (action === "accept") {
       const connection = await RoommateConnectionModel.findOne({ _id: request.params.id, status: "active" }).session(session);
@@ -341,11 +363,24 @@ export const respondRoommatePairing = async (request: Request, response: Respons
     pairingRequest.status = status;
     pairingRequest.respondedAt = new Date();
     await pairingRequest.save({ session });
+    return action === "decline" || action === "cancel";
   }));
   if (action === "accept") {
-    for (const id of [userId, otherId]) void createNotification({ userId: id, type: "roommate_paired",
+    for (const id of [userId, otherId]) void createAppAndEmailNotification({ userId: id, type: "roommate_paired",
       title: "Roommate pairing confirmed", body: "Your roommate profile is now private.",
       data: { route: "RoommateConnection", connectionId: request.params.id }, dedupeKey: `roommate-paired:${request.params.requestId}:${id}` });
+  }
+  if (notifyPeer) {
+    const pendingRequest = await RoommateRequestModel.findById(request.params.requestId).select("requesterId recipientId").lean();
+    const peerId = action === "decline" ? pendingRequest?.requesterId.toString() : pendingRequest?.recipientId.toString();
+    if (peerId) void createAppAndEmailNotification({
+      userId: peerId,
+      type: action === "decline" ? "roommate_request_declined" : "roommate_request_cancelled",
+      title: action === "decline" ? "Roommate request declined" : "Roommate request withdrawn",
+      body: action === "decline" ? "Your roommate request was declined." : "A roommate request was withdrawn.",
+      data: { route: "RoommateConnection", connectionId: request.params.id },
+      dedupeKey: `roommate-request-${status}:${request.params.requestId}`,
+    });
   }
   if (action === "accept") {
     const affected = await RoommateConnectionModel.find({ participantIds: { $in: [userId, otherId] } }).select("participantIds").lean();

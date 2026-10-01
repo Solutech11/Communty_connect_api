@@ -17,6 +17,7 @@ const testFiles = [
   "tests/web-ticket-callback.test.ts",
   "tests/request-body-log.test.ts",
   "tests/roommate.test.ts",
+  "tests/chat-realtime.test.ts",
   "tests/roommate.integration.test.ts",
 ];
 

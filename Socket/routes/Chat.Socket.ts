@@ -191,7 +191,7 @@ const ChatSocket = (socket: Socket, io: Namespace): void => {
     void emitTypingState(payload, false);
   });
 
-  const communityIdSchema = z.string().regex(/^[a-fd]{24}$/i, "Invalid community ID");
+  const communityIdSchema = z.string().regex(/^[a-f\d]{24}$/i, "Invalid community ID");
   const parseCommunityId = (payload: unknown): string | null => {
     const value = typeof payload === "object" && payload !== null && "communityId" in payload
       ? (payload as { communityId?: unknown }).communityId
@@ -240,8 +240,9 @@ const ChatSocket = (socket: Socket, io: Namespace): void => {
     });
   });
   socket.on("disconnect", (reason) => {
-    logger.debug(
+    logger.info(
       {
+        namespace: io.name,
         reason,
         socketId: socket.id,
         userId,
@@ -250,13 +251,14 @@ const ChatSocket = (socket: Socket, io: Namespace): void => {
     );
   });
 
-  logger.debug(
+  logger.info(
     {
       namespace: io.name,
       socketId: socket.id,
+      transport: socket.conn.transport.name,
       userId,
     },
-    "Chat socket connected",
+    "Authenticated chat socket connected",
   );
 };
 

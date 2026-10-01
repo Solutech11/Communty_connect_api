@@ -10,6 +10,11 @@ const notificationSchema = new Schema(
     data: { type: Schema.Types.Mixed, default: {} },
     readAt: { type: Date },
     pushTicketIds: [{ type: String }],
+    emailDelivery: {
+      status: { type: String, enum: ["sending", "sent", "failed", "skipped"] },
+      claimedAt: { type: Date },
+      sentAt: { type: Date },
+    },
   },
   { timestamps: true, versionKey: false },
 );

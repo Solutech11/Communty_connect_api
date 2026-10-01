@@ -73,6 +73,14 @@ const Socket = async (server: HttpServer): Promise<Server> => {
     pingInterval: 25_000,
   });
 
+  io.engine.on("connection_error", (error: { code: number }) => {
+    // Engine errors may contain request headers and query data; log only the code.
+    logger.warn(
+      { operation: "socket_handshake", code: error.code, path: "/socket.io/" },
+      "Socket.IO transport handshake rejected",
+    );
+  });
+
   if (redisClient.isReady) {
     const publisher = redisClient.duplicate();
     const subscriber = redisClient.duplicate();
@@ -88,15 +96,25 @@ const Socket = async (server: HttpServer): Promise<Server> => {
 
   chatNamespace.on("connection", (socket) => {
     const userId = socket.data.userId as string;
-    void socket.join(`user:${userId}`);
-
-    socket.emit("socket:ready", {
-      userId,
-      namespace: "/chat",
-    });
-
     ChatSocket(socket, chatNamespace);
+    void (async () => {
+      await socket.join(`user:${userId}`);
+      socket.emit("socket:ready", { userId, namespace: "/chat" });
+    })().catch(() => {
+      logger.warn({ operation: "socket_user_room_join", userId, socketId: socket.id }, "Socket user room join failed");
+      socket.disconnect(true);
+    });
   });
+
+  logger.info(
+    {
+      namespace: chatNamespace.name,
+      path: "/socket.io/",
+      transports: ["polling", "websocket"],
+      redisAdapter: redisClient.isReady,
+    },
+    "Socket.IO chat gateway initialized",
+  );
 
   return io;
 };

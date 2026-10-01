@@ -8,6 +8,7 @@ import { sendSuccess } from "../utils/response.utils";
 import { blockedUserIds, requireUnblocked, pairKeyFor, withUserLocks } from "../utils/userBlock.utils";
 import { ensureDirectConversation } from "../utils/directConversation.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
+import { emitConversationMessage } from "../utils/chatRealtime.utils";
 
 const requireParticipant = async (conversationId: string, userId: string) => {
   const conversation = await ConversationModel.findOne({
@@ -258,8 +259,10 @@ const persistMessage = async (request: Request, response: Response): Promise<Res
   await message.populate("senderId", "firstName lastName avatarUrl");
 
   const responseMessage = messageDto(message.toObject() as unknown as PopulatedMessage);
-  request.app.get("io")?.to(`conversation:${conversation._id.toString()}`).emit(
-    "message:new",
+  emitConversationMessage(
+    request.app.get("io"),
+    conversation._id.toString(),
+    conversation.participantIds.map(String),
     responseMessage,
   );
   return sendSuccess(response, 201, "Message sent", { message: responseMessage });
@@ -274,6 +277,7 @@ export const markConversationRead = async (request: Request, response: Response)
   request.app.get("io")?.to(`conversation:${request.params.id as string}`).emit("conversation:read", {
     conversationId: request.params.id as string,
     userId: request.auth?.id,
+    readAt: new Date().toISOString(),
   });
   return sendSuccess(response, 200, "Conversation marked as read");
 };

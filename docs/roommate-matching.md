@@ -33,6 +33,14 @@ evicts sockets from its direct conversation rooms. Group membership is separate.
 Socket events `roommates:changed` and `social:access-changed` carry empty payloads
 and signal clients to clear transient contact data and reload authorized REST data.
 
+Meaningful roommate events and friend requests/acceptances create an in-app
+notification and Expo push, then email the account's verified address. These
+include mutual matches, roommate requests and responses, contact-consent changes,
+and ended connects. Individual likes/passes and a user's own profile edits stay
+quiet. When ZeptoMail is unavailable outside production, the mailer records a
+redacted envelope in the terminal; it never prints OTPs or email bodies. Production
+requires the ZeptoMail token.
+
 ## Matching
 
 Eligibility requires compatible housing modes, state/LGA, annual rent range,

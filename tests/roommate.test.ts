@@ -172,6 +172,8 @@ test("socket joins and already-joined typing fail closed after a block", async (
   let joined = 0;
   let emitted = 0;
   const socket = {
+    id: "fixture-socket",
+    conn: { transport: { name: "websocket" } },
     data: { userId: leftId }, rooms,
     on(event: string, handler: (...args: unknown[]) => unknown) { handlers.set(event, handler); },
     async join() { joined += 1; }, async leave(value: string) { rooms.delete(value); },

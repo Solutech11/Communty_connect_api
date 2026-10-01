@@ -1,6 +1,19 @@
 import axios from "axios";
 import { env } from "../Config/env";
 import { AppError } from "./AppError";
+import { logger } from "./logger.utils";
+
+const logTerminalFallback = (input: { toEmail: string; subject: string; html: string }): void => {
+  // Email bodies can contain OTPs, contact details, receipts, and private content.
+  // Log only a redacted envelope so development still shows that mail was captured.
+  logger.info({
+    operation: "development_email_fallback",
+    recipient: "[REDACTED]",
+    subject: "[REDACTED]",
+    body: input.html,
+    bodyBytes: Buffer.byteLength(input.html, "utf8"),
+  }, "Email captured by terminal fallback; content redacted");
+};
 
 export const sendEmail = async (input: {
   toEmail: string;
@@ -8,6 +21,14 @@ export const sendEmail = async (input: {
   subject: string;
   html: string;
 }): Promise<void> => {
+  if (!env.ZEPTOMAIL_SEND_MAIL_TOKEN) {
+    if (!env.isProduction) {
+      logTerminalFallback(input);
+      return;
+    }
+    throw new AppError(503, "Email delivery is unavailable", "EMAIL_PROVIDER_UNAVAILABLE");
+  }
+
   try {
     await axios.post(
       env.ZEPTOMAIL_API_URL,
@@ -36,6 +57,10 @@ export const sendEmail = async (input: {
       },
     );
   } catch (error) {
+    if (!env.isProduction) {
+      logTerminalFallback(input);
+      return;
+    }
     logger.warn(
       {
         operation: "zeptomail_send_email",
@@ -58,7 +83,6 @@ export const otpEmailTemplate = (name: string, otp: string, purpose: string): st
     </div>
   `;
 };
-import { logger } from "./logger.utils";
 
 const escapeHtml = (value: string): string => {
   return value
