@@ -4,6 +4,7 @@ const conversationSchema = new Schema(
   {
     type: { type: String, enum: ["direct", "group", "support", "ai"], required: true, index: true },
     title: { type: String, maxlength: 120 },
+    directPairKey: { type: String },
     participantIds: [{ type: Schema.Types.ObjectId, ref: "User", required: true }],
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     lastMessageAt: { type: Date, index: true },
@@ -13,6 +14,9 @@ const conversationSchema = new Schema(
 );
 
 conversationSchema.index({ participantIds: 1, lastMessageAt: -1 });
+conversationSchema.index({ directPairKey: 1 }, {
+  unique: true, partialFilterExpression: { directPairKey: { $type: "string" } },
+});
 
 export type Conversation = InferSchemaType<typeof conversationSchema>;
 export const ConversationModel =

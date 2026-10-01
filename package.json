@@ -12,7 +12,8 @@
     "test": "tsx scripts/run-tests.ts",
     "test:watch": "tsx --test --watch tests/crypto.test.ts",
     "docs:check": "tsx scripts/check-route-docs.ts",
-    "seed:admin": "tsx scripts/seed-admin.ts"
+    "seed:admin": "tsx scripts/seed-admin.ts",
+    "indexes:roommates": "tsx scripts/create-roommate-indexes.ts"
   },
   "engines": {
     "node": ">=20.0.0"

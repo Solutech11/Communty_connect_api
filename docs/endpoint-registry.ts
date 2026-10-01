@@ -1,5 +1,7 @@
 ﻿export type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
+import { roommateEndpoints } from "./roommate-contracts";
+
 export interface EndpointDefinition {
   method: HttpMethod;
   path: string;
@@ -13,6 +15,7 @@ export interface EndpointDefinition {
 }
 
 export const apiEndpoints: EndpointDefinition[] = [
+  ...roommateEndpoints,
   { method: "post", path: "/auth/register", tag: "Auth", summary: "Register an account", description: "Creates a pending member, wallet, and one-time email verification code. An optional valid GeoJSON user location is saved for nearby-event ranking.", auth: false, requestBody: true },
   { method: "post", path: "/auth/verify-email", tag: "Auth", summary: "Verify email", description: "Verifies the six-digit email code and creates an access/refresh token session.", auth: false, requestBody: true },
   { method: "post", path: "/auth/resend-verification", tag: "Auth", summary: "Resend verification code", description: "Issues a replacement verification code without revealing account existence.", auth: false, requestBody: true },

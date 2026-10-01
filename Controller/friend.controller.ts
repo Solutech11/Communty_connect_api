@@ -5,6 +5,7 @@ import { UserModel } from "../models/Auth/User.model";
 import { AppError } from "../utils/AppError";
 import { sendSuccess } from "../utils/response.utils";
 import { createNotification } from "../utils/notificationService.utils";
+import { blockedUserIds, requireUnblocked, withUserLocks } from "../utils/userBlock.utils";
 
 const pairKeyFor = (left: string, right: string): string => [left, right].sort().join(":");
 const profileFields = "firstName lastName avatarUrl state lga interests";
@@ -55,8 +56,10 @@ const populateFriendship = async (id: Types.ObjectId) => {
 };
 
 export const listFriends = async (request: Request, response: Response): Promise<Response> => {
+  const excluded = await blockedUserIds(request.auth!.id);
   const records = await FriendshipModel.find({
     status: "accepted",
+    requesterId: { $nin: excluded }, addresseeId: { $nin: excluded },
     $or: [{ requesterId: request.auth?.id }, { addresseeId: request.auth?.id }],
   })
     .populate("requesterId", profileFields)
@@ -69,7 +72,9 @@ export const listFriends = async (request: Request, response: Response): Promise
 };
 
 export const listFriendRequests = async (request: Request, response: Response): Promise<Response> => {
+  const excluded = await blockedUserIds(request.auth!.id);
   const records = await FriendshipModel.find({
+    requesterId: { $nin: excluded },
     addresseeId: request.auth?.id,
     status: "pending",
   })
@@ -87,6 +92,7 @@ export const suggestions = async (request: Request, response: Response): Promise
     $or: [{ requesterId: request.auth?.id }, { addresseeId: request.auth?.id }],
   }).lean();
   const excluded = new Set<string>([request.auth?.id as string]);
+  for (const id of await blockedUserIds(request.auth!.id)) excluded.add(id);
 
   for (const link of links) {
     excluded.add(link.requesterId.toString());
@@ -113,25 +119,27 @@ export const sendFriendRequest = async (request: Request, response: Response): P
     throw new AppError(404, "User was not found", "USER_NOT_FOUND");
   }
 
-  if (await FriendshipModel.exists({ pairKey: pairKeyFor(request.auth?.id as string, targetId) })) {
-    throw new AppError(409, "A friendship or request already exists", "FRIENDSHIP_ALREADY_EXISTS");
-  }
-
-  const friendship = await FriendshipModel.create({
-    requesterId: request.auth?.id,
-    addresseeId: targetId,
-    pairKey: pairKeyFor(request.auth?.id as string, targetId),
+  const friendship = await withUserLocks([request.auth!.id, targetId], async () => {
+    await requireUnblocked(request.auth!.id, targetId);
+    const pairKey = pairKeyFor(request.auth!.id, targetId);
+    const existing = await FriendshipModel.findOne({ pairKey });
+    if (existing && ["pending", "accepted"].includes(existing.status)) return existing;
+    if (existing?.status === "blocked") throw new AppError(403, "This connection is unavailable", "CONNECTION_UNAVAILABLE");
+    return FriendshipModel.findOneAndUpdate({ pairKey }, {
+      $set: { requesterId: request.auth!.id, addresseeId: targetId, status: "pending" },
+      $unset: { respondedAt: 1 }, $setOnInsert: { pairKey },
+    }, { upsert: true, new: true });
   });
-  void createNotification({
-    userId: targetId,
+  if (friendship!.status === "pending" && friendship!.requesterId.toString() === request.auth!.id) void createNotification({
+    userId: friendship!.addresseeId.toString(),
     type: "connection_request",
     title: "New connection request",
     body: "Someone in your community would like to connect.",
-    data: { friendshipId: friendship._id.toString(), route: "Friends" },
-    dedupeKey: `friend-request:${friendship._id.toString()}`,
+    data: { friendshipId: friendship!._id.toString(), route: "Friends" },
+    dedupeKey: `friend-request:${friendship!._id.toString()}:${friendship!.updatedAt.getTime()}`,
   });
   return sendSuccess(response, 201, "Friend request sent", {
-    friendship: await populateFriendship(friendship._id),
+    friendship: await populateFriendship(friendship!._id),
   });
 };
 
@@ -140,11 +148,14 @@ export const respondToFriendRequest = async (
   response: Response,
 ): Promise<Response> => {
   const status = request.body.action === "accept" ? "accepted" : "declined";
-  const friendship = await FriendshipModel.findOneAndUpdate(
-    { _id: request.params.id as string, addresseeId: request.auth?.id, status: "pending" },
-    { status, respondedAt: new Date() },
-    { new: true },
-  );
+  const pending = await FriendshipModel.findOne({ _id: request.params.id, addresseeId: request.auth!.id }).lean();
+  const friendship = pending ? await withUserLocks([request.auth!.id, pending.requesterId.toString()], async () => {
+    await requireUnblocked(request.auth!.id, pending.requesterId.toString());
+    return FriendshipModel.findOneAndUpdate(
+      { _id: request.params.id as string, addresseeId: request.auth!.id, status: "pending" },
+      { status, respondedAt: new Date() }, { new: true },
+    );
+  }) : null;
 
   if (!friendship) {
     throw new AppError(404, "Pending friend request was not found", "FRIEND_REQUEST_NOT_FOUND");

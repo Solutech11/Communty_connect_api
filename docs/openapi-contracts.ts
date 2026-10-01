@@ -1,5 +1,6 @@
 ﻿export type OpenApiSchema = Record<string, unknown>;
 
+import { attachRoommateContracts } from "./roommate-contracts";
 import {
   DISPUTE_STATUSES,
   EVENT_STATUSES,
@@ -1866,3 +1867,8 @@ export const pathParameterExamples: Record<string, { description: string; exampl
   orderNumber: { description: "Server-generated order number.", example: "CC-1784370000000-A1B2C3D4", schema: { type: "string", minLength: 12, maxLength: 80 } },
   reference: { description: "Server-generated payment or transfer reference.", example: "topup_550e8400-e29b-41d4-a716-446655440000", schema: { type: "string", minLength: 16, maxLength: 80 } },
 };
+
+attachRoommateContracts({
+  success: successContracts, bodies: requestBodyContracts, schemas: requestBodySchemaContracts,
+  queries: queryParameterContracts, responses: ticketResponseSchemaContracts,
+}, inferSchema);

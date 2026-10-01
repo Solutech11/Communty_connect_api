@@ -13,10 +13,12 @@ import userRouter from "./users/User.route";
 import walletRouter from "./wallet/Wallet.route";
 import webhookRouter from "./webhooks/Webhook.route";
 import ticketRouter from "./tickets/Ticket.route";
+import roommateRouter from "./roommates/Roommate.route";
 
 const router = Router();
 router.use("/auth", authRouter);
 router.use("/users", userRouter);
+router.use("/roommates", roommateRouter);
 router.use("/events", eventRouter);
 router.use("/tickets", ticketRouter);
 router.use("/communities", communityRouter);

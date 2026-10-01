@@ -4,6 +4,7 @@ import { ConversationModel } from "../../models/Chat/Conversation.model";
 import { requireActiveCommunityMember } from "../../utils/communityAccess.utils";
 import { UserModel } from "../../models/Auth/User.model";
 import { logger } from "../../utils/logger.utils";
+import { requireUnblocked } from "../../utils/userBlock.utils";
 
 const conversationIdSchema = z.string().regex(/^[a-f\d]{24}$/i, "Invalid conversation ID");
 
@@ -37,13 +38,18 @@ const ChatSocket = (socket: Socket, io: Namespace): void => {
   const userId = socket.data.userId as string;
 
   const joinConversation = async (conversationId: string): Promise<boolean> => {
-    const isParticipant = await ConversationModel.exists({
+    const isParticipant = await ConversationModel.findOne({
       _id: conversationId,
       participantIds: userId,
     });
 
     if (!isParticipant) {
       return false;
+    }
+
+    if (isParticipant.type === "direct") {
+      const otherId = isParticipant.participantIds.find((id) => id.toString() !== userId);
+      if (otherId) await requireUnblocked(userId, otherId.toString());
     }
 
     const previousConversationId = socket.data.currentConversationId as string | undefined;
@@ -130,7 +136,7 @@ const ChatSocket = (socket: Socket, io: Namespace): void => {
     void leaveConversation(payload);
   });
 
-  const emitTypingState = (payload: unknown, isTyping: boolean): void => {
+  const emitTypingState = async (payload: unknown, isTyping: boolean): Promise<void> => {
     const conversationId = getConversationId(payload);
 
     if (!conversationId) {
@@ -140,6 +146,19 @@ const ChatSocket = (socket: Socket, io: Namespace): void => {
     const room = `conversation:${conversationId}`;
 
     if (!socket.rooms.has(room)) {
+      return;
+    }
+
+    try {
+      const conversation = await ConversationModel.findOne({ _id: conversationId, participantIds: userId }).lean();
+      if (!conversation) return;
+      if (conversation.type === "direct") {
+        const otherId = conversation.participantIds.find((id) => id.toString() !== userId);
+        if (otherId) await requireUnblocked(userId, otherId.toString());
+      }
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error)) logger.warn({ error, conversationId, userId }, "Socket typing access check failed");
+      await socket.leave(room);
       return;
     }
 
@@ -161,15 +180,15 @@ const ChatSocket = (socket: Socket, io: Namespace): void => {
       "isTyping" in payload &&
       (payload as { isTyping?: unknown }).isTyping === true;
 
-    emitTypingState(payload, isTyping);
+    void emitTypingState(payload, isTyping);
   });
 
   socket.on("typing:start", (payload: unknown) => {
-    emitTypingState(payload, true);
+    void emitTypingState(payload, true);
   });
 
   socket.on("typing:stop", (payload: unknown) => {
-    emitTypingState(payload, false);
+    void emitTypingState(payload, false);
   });
 
   const communityIdSchema = z.string().regex(/^[a-fd]{24}$/i, "Invalid community ID");

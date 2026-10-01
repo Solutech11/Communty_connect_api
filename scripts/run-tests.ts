@@ -16,6 +16,8 @@ const testFiles = [
   "tests/event-discovery.test.ts",
   "tests/web-ticket-callback.test.ts",
   "tests/request-body-log.test.ts",
+  "tests/roommate.test.ts",
+  "tests/roommate.integration.test.ts",
 ];
 
 const runTestFile = async (testFile: string): Promise<void> => {

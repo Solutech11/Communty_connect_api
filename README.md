@@ -214,6 +214,35 @@ Private code lookup uses a keyed index created when an access code is set. Owner
 | PATCH | `/friends/requests/{id}` | Yes | Accept or decline inbound request |
 | DELETE | `/friends/{id}` | Yes | Remove participating friendship |
 
+### Roommates and User Blocks
+
+Roommate discovery is opt-in. Rent budgets are personal annual shares in kobo.
+Mutual likes create connects; contacts require separate consent. Only a request's
+recipient can accept a pairing, making both roommate profiles private. Either
+person can end it; both profiles stay paused until explicitly resumed.
+See [matching, consent, deployment and integration tests](docs/roommate-matching.md).
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/roommates/questions` | Yes | Questionnaire options and version |
+| GET | `/roommates/profiles/me` | Yes | My roommate profile or null |
+| PUT | `/roommates/profiles/me` | Yes | Replace my questionnaire answers |
+| PATCH | `/roommates/profiles/me/visibility` | Yes | Activate, pause or resume discovery |
+| GET | `/roommates/candidates` | Yes | Ranked, paginated compatible profiles |
+| PUT | `/roommates/decisions/{userId}` | Yes | Idempotent like or pass |
+| GET | `/roommates/connections` | Yes | Paginated mutual connects |
+| GET | `/roommates/connections/{id}` | Yes | Authorized connect detail |
+| DELETE | `/roommates/connections/{id}` | Yes | Ignore or end a connect |
+| PUT | `/roommates/connections/{id}/contact-consents/me` | Yes | Choose phone and/or email to share |
+| DELETE | `/roommates/connections/{id}/contact-consents/me` | Yes | Revoke my consent |
+| GET | `/roommates/connections/{id}/contacts` | Yes | Read contacts after both consent |
+| POST | `/roommates/connections/{id}/requests` | Yes | Request roommate pairing |
+| PATCH | `/roommates/connections/{id}/requests/{requestId}` | Yes | Accept, decline or cancel request |
+| DELETE | `/roommates/connections/{id}/pairing` | Yes | End pairing and pause profiles |
+| GET | `/users/me/blocks` | Yes | Paginated users I blocked |
+| PUT | `/users/me/blocks/{userId}` | Yes | Block direct interaction |
+| DELETE | `/users/me/blocks/{userId}` | Yes | Remove my block |
+
 ### Chat and AI
 
 | Method | Path | Auth | Purpose |

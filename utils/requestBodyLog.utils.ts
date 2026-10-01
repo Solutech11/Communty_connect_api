@@ -10,7 +10,7 @@ const paystackEventTypes = new Set([
 ]);
 const safePaystackDataFieldNames = new Set(["id", "reference", "amount", "status", "transfer_code"]);
 
-const sensitiveFieldPattern = /password|passwd|pwd|secret|token|otp|authorization|cookie|account|email|phone|message|text|content|description|details|bio|name|address|location|coordinate|latitude|longitude|amount|price|payment|recipient|qr|image|cover|avatar|note|reason/i;
+const sensitiveFieldPattern = /password|passwd|pwd|secret|token|otp|authorization|cookie|account|email|phone|message|text|content|description|details|bio|name|address|location|coordinate|latitude|longitude|amount|price|payment|recipient|qr|image|cover|avatar|note|reason|rent|gender|smok|pets|sleep|cleanliness|guests|adult|movein|socialpreference/i;
 
 const safeStringValuesByField: Record<string, ReadonlySet<string>> = {
   action: new Set(["accept", "decline", "reject"]),

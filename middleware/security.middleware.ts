@@ -84,6 +84,16 @@ export const authRateLimiter = rateLimit({
   },
 });
 
+export const roommateRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 90,
+  keyGenerator: (request) => request.auth!.id,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  store: rateLimitStore("rl:roommates:"),
+  message: { success: false, error: { code: "RATE_LIMIT_EXCEEDED", message: "Too many roommate requests. Try again shortly." } },
+});
+
 export const aiRateLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 20,

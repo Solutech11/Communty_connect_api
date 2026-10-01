@@ -5,6 +5,9 @@ import { MessageModel } from "../models/Chat/Message.model";
 import { UserModel } from "../models/Auth/User.model";
 import { AppError } from "../utils/AppError";
 import { sendSuccess } from "../utils/response.utils";
+import { blockedUserIds, requireUnblocked, pairKeyFor, withUserLocks } from "../utils/userBlock.utils";
+import { ensureDirectConversation } from "../utils/directConversation.utils";
+import { withRedisLock } from "../utils/redisLock.utils";
 
 const requireParticipant = async (conversationId: string, userId: string) => {
   const conversation = await ConversationModel.findOne({
@@ -14,6 +17,11 @@ const requireParticipant = async (conversationId: string, userId: string) => {
 
   if (!conversation) {
     throw new AppError(404, "Conversation was not found", "CONVERSATION_NOT_FOUND");
+  }
+
+  if (conversation.type === "direct") {
+    const otherId = conversation.participantIds.find((id) => id.toString() !== userId);
+    if (otherId) await requireUnblocked(userId, otherId.toString());
   }
 
   return conversation;
@@ -160,10 +168,12 @@ const conversationDtos = async (
 };
 
 export const listConversations = async (request: Request, response: Response): Promise<Response> => {
+  const blocked = new Set(await blockedUserIds(request.auth!.id));
   const conversations = await ConversationModel.find({ participantIds: request.auth?.id })
     .sort({ lastMessageAt: -1, updatedAt: -1 })
     .lean();
-  const hydrated = await conversationDtos(conversations, request.auth?.id as string);
+  const hydrated = await conversationDtos(conversations.filter((item) =>
+    item.type !== "direct" || !item.participantIds.some((id) => blocked.has(id.toString()))), request.auth!.id);
   return sendSuccess(response, 200, "Conversations retrieved", { conversations: hydrated });
 };
 
@@ -181,14 +191,12 @@ export const createConversation = async (request: Request, response: Response): 
   }
 
   if (request.body.type === "direct") {
-    const existing = await ConversationModel.findOne({
-      type: "direct",
-      participantIds: { $all: participantIds, $size: 2 },
-    }).lean();
-    if (existing) {
-      const [conversation] = await conversationDtos([existing], request.auth?.id as string);
-      return sendSuccess(response, 200, "Conversation retrieved", { conversation });
-    }
+    if (participantIds.length !== 2) throw new AppError(422, "Direct chat requires exactly two people", "INVALID_PARTICIPANTS");
+    const left = request.auth!.id;
+    const right = participantIds.find((id) => id !== left) as string;
+    const record = await withUserLocks([left, right], () => withRedisLock(`direct-chat:${pairKeyFor(left, right)}`, () => ensureDirectConversation(left, right)));
+    const [conversation] = await conversationDtos([record.toObject()], left);
+    return sendSuccess(response, 200, "Conversation retrieved", { conversation });
   }
 
   const created = await ConversationModel.create({
@@ -222,7 +230,7 @@ export const listMessages = async (request: Request, response: Response): Promis
   });
 };
 
-export const sendMessage = async (request: Request, response: Response): Promise<Response> => {
+const persistMessage = async (request: Request, response: Response): Promise<Response> => {
   const conversation = await requireParticipant(request.params.id as string, request.auth?.id as string);
   const existing = await MessageModel.findOne({
     conversationId: conversation._id,
@@ -268,4 +276,12 @@ export const markConversationRead = async (request: Request, response: Response)
     userId: request.auth?.id,
   });
   return sendSuccess(response, 200, "Conversation marked as read");
+};
+
+export const sendMessage = async (request: Request, response: Response): Promise<Response> => {
+  const conversation = await requireParticipant(request.params.id as string, request.auth!.id);
+  if (conversation.type === "direct") {
+    return withUserLocks(conversation.participantIds.map(String), () => persistMessage(request, response));
+  }
+  return persistMessage(request, response);
 };

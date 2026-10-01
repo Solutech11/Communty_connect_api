@@ -21,6 +21,9 @@ import { imageUpload } from "../../middleware/imageUpload.middleware";
 import { validate } from "../../middleware/validate.middleware";
 import { idParamsSchema, passwordSchema } from "../../schemas/common.schemas";
 import { reportBodySchema } from "../../schemas/report.schemas";
+import { listUserBlocks, blockUser, unblockUser } from "../../Controller/userBlock.controller";
+import { roommatePageSchema } from "../../schemas/roommate.schemas";
+import { objectIdSchema } from "../../schemas/common.schemas";
 import { asyncHandler } from "../../utils/asyncHandler.utils";
 
 const router = Router();
@@ -35,6 +38,9 @@ const geoPoint = z.object({
 }).strict();
 
 router.use(authenticate);
+router.get("/me/blocks", validate({ query: roommatePageSchema }), asyncHandler(listUserBlocks));
+router.put("/me/blocks/:userId", validate({ params: z.object({ userId: objectIdSchema }) }), asyncHandler(blockUser));
+router.delete("/me/blocks/:userId", validate({ params: z.object({ userId: objectIdSchema }) }), asyncHandler(unblockUser));
 router.get("/me", asyncHandler(getProfile));
 router.get(
   "/me/communities",
