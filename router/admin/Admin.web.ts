@@ -16,7 +16,9 @@ import {
   renderAdminEvents,
   renderAdminEventDetails,
   renderAdminReports,
+  replyToAdminDispute,
   setAdminCommunityStatus,
+  updateAdminDisputeStatus,
   updateAdminReport,
 } from "../../Controller/adminModeration.controller";
 import {
@@ -45,6 +47,8 @@ router.get("/communities/:id", requireAdminPermission("communities:moderate"), a
 router.post("/communities/:id/status", requireAdminPermission("communities:moderate"), requireAdminCsrf, asyncHandler(setAdminCommunityStatus));
 router.get("/reports", requireAdminPermission("reports:moderate"), asyncHandler(renderAdminReports));
 router.post("/reports/:id/status", requireAdminPermission("reports:moderate"), requireAdminCsrf, asyncHandler(updateAdminReport));
+router.post("/disputes/:id/messages", requireAdminPermission("reports:moderate"), requireAdminCsrf, asyncHandler(replyToAdminDispute));
+router.post("/disputes/:id/status", requireAdminPermission("reports:moderate"), requireAdminCsrf, asyncHandler(updateAdminDisputeStatus));
 router.post("/logout", requireAdminCsrf, asyncHandler(logoutAdmin));
 router.post(
   "/admins",

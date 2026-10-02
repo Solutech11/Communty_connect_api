@@ -3,9 +3,12 @@ import type { Namespace } from "socket.io";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { CommunityModel } from "../models/Community/Community.model";
+import { CommunityAttachmentModel } from "../models/Community/CommunityAttachment.model";
 import { CommunityContentModel } from "../models/Community/CommunityContent.model";
+import { CommunityJoinRequestModel } from "../models/Community/CommunityJoinRequest.model";
 import { CommunityMemberModel } from "../models/Community/CommunityMember.model";
 import { CommunityMembershipOrderModel } from "../models/Community/CommunityMembershipOrder.model";
+import { DisputeModel } from "../models/Dispute/Dispute.model";
 import { EventModel } from "../models/Event/Event.model";
 import { TicketOrderModel } from "../models/Event/TicketOrder.model";
 import { TicketTypeModel } from "../models/Event/TicketType.model";
@@ -27,7 +30,7 @@ const parsePage = (value: unknown): number => {
 };
 
 const redirectWithMessage = (response: Response, path: string, message: string): void => {
-  response.redirect(`${path}?message=${encodeURIComponent(message)}`);
+  response.redirect(`${path}${path.includes("?") ? "&" : "?"}message=${encodeURIComponent(message)}`);
 };
 
 const adminId = (request: Request) => request.admin?.userId as never;
@@ -189,29 +192,54 @@ export const renderAdminCommunities = async (request: Request, response: Respons
 
 export const renderAdminCommunityDetails = async (request: Request, response: Response): Promise<void> => {
   const communityId = parseId(request.params.id, "Community");
-  const page = parsePage(request.query.page);
-  const [community, owner, members, memberCount, memberStats, orders, orderCount, content] = await Promise.all([
+  const memberPage = parsePage(request.query.memberPage || request.query.page);
+  const orderPage = parsePage(request.query.orderPage);
+  const contentPage = parsePage(request.query.contentPage);
+  const orderQuery = { communityId };
+  const [community, members, memberCount, memberStats, orders, orderCount, paidOrderCount, orderStatusCounts, content, contentCount, joinRequests, joinRequestCounts] = await Promise.all([
     CommunityModel.findById(communityId)
       .select("+adminDeactivatedAt +adminDeactivatedBy +adminDeactivationReason +adminActivatedAt +adminActivatedBy")
       .populate("ownerId", "firstName lastName email")
       .populate("adminDeactivatedBy", "firstName lastName")
       .populate("adminActivatedBy", "firstName lastName")
+      .populate("rulesUpdatedBy", "firstName lastName")
       .lean(),
-    CommunityModel.findById(communityId).select("ownerId").lean(),
-    CommunityMemberModel.find({ communityId }).populate("userId", "firstName lastName status").sort({ joinedAt: -1 }).skip((page - 1) * 25).limit(25).lean(),
+    CommunityMemberModel.find({ communityId }).populate("userId", "firstName lastName email status").sort({ joinedAt: -1 }).skip((memberPage - 1) * 25).limit(25).lean(),
     CommunityMemberModel.countDocuments({ communityId }),
     CommunityMemberModel.aggregate<{ _id: string; count: number }>([
       { $match: { communityId: new mongoose.Types.ObjectId(communityId) } },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]),
-    CommunityMembershipOrderModel.find({ communityId, status: { $in: ["paid", "refunded"] } })
+    CommunityMembershipOrderModel.find(orderQuery)
       .populate("buyerId", "firstName lastName email")
-      .sort({ paidAt: -1 })
+      .sort({ createdAt: -1, paidAt: -1 })
+      .skip((orderPage - 1) * 25)
       .limit(25)
       .lean(),
+    CommunityMembershipOrderModel.countDocuments(orderQuery),
     CommunityMembershipOrderModel.countDocuments({ communityId, status: "paid" }),
-    CommunityContentModel.find({ communityId }).populate("authorId", "firstName lastName")
-      .sort({ createdAt: -1 }).limit(8).lean(),
+    CommunityMembershipOrderModel.aggregate<{ _id: string; count: number }>([
+      { $match: { communityId: new mongoose.Types.ObjectId(communityId) } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+    CommunityContentModel.find({ communityId })
+      .populate("authorId", "firstName lastName")
+      .populate({ path: "attachments", model: CommunityAttachmentModel, select: "url thumbnailUrl type name mimeType sizeBytes" })
+      .sort({ createdAt: -1 })
+      .skip((contentPage - 1) * 20)
+      .limit(20)
+      .lean(),
+    CommunityContentModel.countDocuments({ communityId }),
+    CommunityJoinRequestModel.find({ communityId })
+      .populate("requesterId", "firstName lastName email status")
+      .populate("reviewedBy", "firstName lastName")
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean(),
+    CommunityJoinRequestModel.aggregate<{ _id: string; count: number }>([
+      { $match: { communityId: new mongoose.Types.ObjectId(communityId) } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
   ]);
   if (!community) throw new AppError(404, "Community was not found", "COMMUNITY_NOT_FOUND");
   response.setHeader("Cache-Control", "no-store");
@@ -226,10 +254,18 @@ export const renderAdminCommunityDetails = async (request: Request, response: Re
     memberStats: Object.fromEntries(memberStats.map((item) => [item._id, item.count])),
     orders,
     orderCount,
-    owner: owner?.ownerId,
+    paidOrderCount,
+    orderStatusCounts: Object.fromEntries(orderStatusCounts.map((item) => [item._id, item.count])),
+    joinRequests,
+    joinRequestCounts: Object.fromEntries(joinRequestCounts.map((item) => [item._id, item.count])),
     content,
-    page,
-    pageCount: Math.max(1, Math.ceil(memberCount / 25)),
+    memberPage,
+    memberPageCount: Math.max(1, Math.ceil(memberCount / 25)),
+    orderPage,
+    orderPageCount: Math.max(1, Math.ceil(orderCount / 25)),
+    contentCount,
+    contentPage,
+    contentPageCount: Math.max(1, Math.ceil(contentCount / 20)),
     message: typeof request.query.message === "string" ? request.query.message.slice(0, 180) : "",
     formatNaira,
   });
@@ -265,18 +301,46 @@ export const setAdminCommunityStatus = async (request: Request, response: Respon
 };
 
 export const renderAdminReports = async (request: Request, response: Response): Promise<void> => {
-  const page = parsePage(request.query.page);
-  const statuses = ["open", "reviewing", "resolved", "dismissed", "all"] as const;
-  const requestedStatus = typeof request.query.status === "string" ? request.query.status : "open";
-  const status = statuses.includes(requestedStatus as typeof statuses[number])
-    ? requestedStatus as typeof statuses[number]
-    : "open";
-  const query = status === "all" ? {} : { status };
-  const [reports, total, counts] = await Promise.all([
-    ReportModel.find(query).populate("reporterId", "firstName lastName status")
-      .sort({ createdAt: -1 }).skip((page - 1) * 30).limit(30).lean(),
-    ReportModel.countDocuments(query),
+  const reportStatuses = ["all", "open", "reviewing", "resolved", "dismissed"] as const;
+  const disputeStatuses = ["all", "open", "under_review", "awaiting_user", "resolved", "closed"] as const;
+  const reportTargetTypes = ["all", "event", "community", "user", "community_message"] as const;
+  const requestedReportStatus = typeof request.query.reportStatus === "string"
+    ? request.query.reportStatus
+    : typeof request.query.status === "string" ? request.query.status : "all";
+  const reportStatus = reportStatuses.includes(requestedReportStatus as typeof reportStatuses[number])
+    ? requestedReportStatus as typeof reportStatuses[number]
+    : "all";
+  const requestedDisputeStatus = typeof request.query.disputeStatus === "string" ? request.query.disputeStatus : "all";
+  const disputeStatus = disputeStatuses.includes(requestedDisputeStatus as typeof disputeStatuses[number])
+    ? requestedDisputeStatus as typeof disputeStatuses[number]
+    : "all";
+  const requestedTargetType = typeof request.query.reportTargetType === "string" ? request.query.reportTargetType : "all";
+  const reportTargetType = reportTargetTypes.includes(requestedTargetType as typeof reportTargetTypes[number])
+    ? requestedTargetType as typeof reportTargetTypes[number]
+    : "all";
+  const reportPage = parsePage(request.query.reportPage || request.query.page);
+  const disputePage = parsePage(request.query.disputePage);
+  const reportQuery: Record<string, unknown> = {};
+  const disputeQuery: Record<string, unknown> = {};
+  if (reportStatus !== "all") reportQuery.status = reportStatus;
+  if (reportTargetType !== "all") reportQuery.targetType = reportTargetType;
+  if (disputeStatus !== "all") disputeQuery.status = disputeStatus;
+
+  const [reports, reportTotal, reportCounts, disputes, disputeTotal, disputeCounts] = await Promise.all([
+    ReportModel.find(reportQuery).populate("reporterId", "firstName lastName status")
+      .sort({ createdAt: -1 }).skip((reportPage - 1) * 25).limit(25).lean(),
+    ReportModel.countDocuments(reportQuery),
     ReportModel.aggregate<{ _id: string; count: number }>([
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+    DisputeModel.find(disputeQuery)
+      .populate("userId", "firstName lastName email status")
+      .populate("transactionId", "reference type direction amountKobo feeKobo currency status title completedAt")
+      .populate("assignedTo", "firstName lastName")
+      .populate("messages.authorId", "firstName lastName role")
+      .sort({ createdAt: -1 }).skip((disputePage - 1) * 25).limit(25).lean(),
+    DisputeModel.countDocuments(disputeQuery),
+    DisputeModel.aggregate<{ _id: string; count: number }>([
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]),
   ]);
@@ -287,32 +351,44 @@ export const renderAdminReports = async (request: Request, response: Response): 
   const [events, communities, users, messages] = await Promise.all([
     EventModel.find({ _id: { $in: idsFor("event") } }).select("title status coverImageUrl state lga startsAt endsAt").lean(),
     CommunityModel.find({ _id: { $in: idsFor("community") } }).select("name slug isActive visibility coverImageUrl state lga").lean(),
-    UserModel.find({ _id: { $in: idsFor("user") } }).select("firstName lastName role status").lean(),
+    UserModel.find({ _id: { $in: idsFor("user") } }).select("firstName lastName email role status").lean(),
     CommunityContentModel.find({ _id: { $in: idsFor("community_message") } })
-      .select("communityId authorId kind text createdAt deletedAt")
-      .populate("communityId", "name")
+      .select("communityId authorId kind text imageUrl attachments createdAt deletedAt")
+      .populate("communityId", "name slug isActive")
       .populate("authorId", "firstName lastName")
+      .populate({ path: "attachments", model: CommunityAttachmentModel, select: "url thumbnailUrl type name mimeType sizeBytes" })
       .lean(),
   ]);
   const targets = new Map<string, unknown>();
-  [...events, ...communities, ...users, ...messages].forEach((target) => targets.set(String(target._id), target));
+  events.forEach((target) => targets.set(`event:${target._id}`, target));
+  communities.forEach((target) => targets.set(`community:${target._id}`, target));
+  users.forEach((target) => targets.set(`user:${target._id}`, target));
+  messages.forEach((target) => targets.set(`community_message:${target._id}`, target));
   const reportsWithTargets = reports.map((report) => ({
     ...report,
-    target: targets.get(String(report.targetId)) || null,
+    target: targets.get(`${report.targetType}:${report.targetId}`) || null,
   }));
 
   response.setHeader("Cache-Control", "no-store");
   response.render("admin/reports", {
-    title: "Reports · Community Connect Admin",
+    title: "Reports and app issues · Community Connect Admin",
     csrfToken: request.admin?.csrfToken,
     permissions: request.admin?.permissions || [],
     activeTab: "reports",
     reports: reportsWithTargets,
-    total,
-    page,
-    pageCount: Math.max(1, Math.ceil(total / 30)),
-    status,
-    counts: Object.fromEntries(counts.map((item) => [item._id, item.count])),
+    reportTotal,
+    reportPage,
+    reportPageCount: Math.max(1, Math.ceil(reportTotal / 25)),
+    reportStatus,
+    reportTargetType,
+    reportCounts: Object.fromEntries(reportCounts.map((item) => [item._id, item.count])),
+    disputes,
+    disputeTotal,
+    disputePage,
+    disputePageCount: Math.max(1, Math.ceil(disputeTotal / 25)),
+    disputeStatus,
+    disputeCounts: Object.fromEntries(disputeCounts.map((item) => [item._id, item.count])),
+    formatNaira,
     message: typeof request.query.message === "string" ? request.query.message.slice(0, 180) : "",
   });
 };
@@ -344,4 +420,63 @@ export const updateAdminReport = async (request: Request, response: Response): P
 
   logger.info({ actorAdminId: request.admin?.adminId, reportId, status: report.status }, "Report reviewed in admin portal");
   redirectWithMessage(response, "/admin/reports", "Report marked " + report.status + ".");
+};
+
+export const replyToAdminDispute = async (request: Request, response: Response): Promise<void> => {
+  const disputeId = parseId(request.params.id, "Dispute");
+  const parsed = z.object({
+    message: z.string().trim().min(1).max(3000),
+    internal: z.enum(["true"]).optional(),
+    _csrf: z.string().min(32).max(256),
+  }).strict().safeParse(request.body);
+  if (!parsed.success) throw new AppError(422, "Enter a valid dispute reply", "VALIDATION_ERROR");
+
+  const dispute = await DisputeModel.findById(disputeId);
+  if (!dispute) throw new AppError(404, "Dispute was not found", "DISPUTE_NOT_FOUND");
+  if (["resolved", "closed"].includes(dispute.status)) {
+    throw new AppError(409, "This dispute cannot receive replies", "DISPUTE_NOT_REPLYABLE");
+  }
+
+  const internal = parsed.data.internal === "true";
+  dispute.messages.push({
+    authorId: adminId(request),
+    message: parsed.data.message,
+    internal,
+  } as never);
+  if (internal && dispute.status === "open") dispute.status = "under_review";
+  if (!internal) dispute.status = "awaiting_user";
+  await dispute.save();
+
+  logger.info({ actorAdminId: request.admin?.adminId, disputeId, internal }, "Admin replied to app issue dispute");
+  redirectWithMessage(response, `/admin/reports?disputeStatus=${encodeURIComponent(dispute.status)}`, "Reply added to dispute.");
+};
+
+export const updateAdminDisputeStatus = async (request: Request, response: Response): Promise<void> => {
+  const disputeId = parseId(request.params.id, "Dispute");
+  const parsed = z.object({
+    status: z.enum(["open", "under_review", "awaiting_user", "resolved", "closed"]),
+    resolution: z.string().trim().max(3000).optional(),
+    _csrf: z.string().min(32).max(256),
+  }).strict().safeParse(request.body);
+  if (!parsed.success) throw new AppError(422, "Choose a valid dispute status", "VALIDATION_ERROR");
+
+  const resolution = parsed.data.resolution || "";
+  if (["resolved", "closed"].includes(parsed.data.status) && resolution.length < 5) {
+    throw new AppError(422, "Add a resolution note of at least 5 characters", "DISPUTE_RESOLUTION_REQUIRED");
+  }
+
+  const dispute = await DisputeModel.findById(disputeId);
+  if (!dispute) throw new AppError(404, "Dispute was not found", "DISPUTE_NOT_FOUND");
+  dispute.status = parsed.data.status;
+  if (["resolved", "closed"].includes(dispute.status)) {
+    dispute.resolvedAt = new Date();
+    dispute.resolution = resolution;
+  } else {
+    dispute.resolvedAt = undefined;
+    dispute.resolution = undefined;
+  }
+  await dispute.save();
+
+  logger.info({ actorAdminId: request.admin?.adminId, disputeId, status: dispute.status }, "App issue dispute status changed");
+  redirectWithMessage(response, `/admin/reports?disputeStatus=${encodeURIComponent(dispute.status)}`, "Dispute marked " + dispute.status.replaceAll("_", " ") + ".");
 };
