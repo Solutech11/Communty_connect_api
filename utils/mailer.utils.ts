@@ -1,7 +1,26 @@
-import axios from "axios";
 import { env } from "../Config/env";
 import { AppError } from "./AppError";
 import { logger } from "./logger.utils";
+
+const RESEND_EMAILS_API_URL = "https://api.resend.com/emails";
+
+const formatMailbox = (name: string, address: string): string => {
+  const safeName = Array.from(name, (character) => {
+    const characterCode = character.charCodeAt(0);
+    return characterCode < 32
+      || characterCode === 34
+      || characterCode === 44
+      || characterCode === 59
+      || characterCode === 60
+      || characterCode === 62
+      || characterCode === 92
+      || characterCode === 127
+      ? " "
+      : character;
+  }).join("").trim();
+
+  return safeName ? safeName + " <" + address + ">" : address;
+};
 
 const logTerminalFallback = (input: { toEmail: string; subject: string; html: string }): void => {
   // Email bodies can contain OTPs, contact details, receipts, and private content.
@@ -20,7 +39,7 @@ export const sendEmail = async (input: {
   subject: string;
   html: string;
 }): Promise<void> => {
-  if (!env.ZEPTOMAIL_SEND_MAIL_TOKEN) {
+  if (!env.RESEND_API_KEY) {
     if (!env.isProduction) {
       logTerminalFallback(input);
       return;
@@ -28,42 +47,37 @@ export const sendEmail = async (input: {
     throw new AppError(503, "Email delivery is unavailable", "EMAIL_PROVIDER_UNAVAILABLE");
   }
 
+  let providerStatus: number | undefined;
+
   try {
-    await axios.post(
-      env.ZEPTOMAIL_API_URL,
-      {
-        from: {
-          address: env.MAIL_FROM_ADDRESS,
-          name: env.MAIL_FROM_NAME,
-        },
-        to: [
-          {
-            email_address: {
-              address: input.toEmail,
-              name: input.toName,
-            },
-          },
-        ],
+    const response = await fetch(RESEND_EMAILS_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + env.RESEND_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: formatMailbox(env.MAIL_FROM_NAME, env.MAIL_FROM_ADDRESS),
+        to: [formatMailbox(input.toName, input.toEmail)],
         subject: input.subject,
-        htmlbody: input.html,
-      },
-      {
-        timeout: 15_000,
-        headers: {
-          Authorization: `${env.ZEPTOMAIL_SEND_MAIL_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      },
-    );
-  } catch (error) {
+        html: input.html,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!response.ok) {
+      providerStatus = response.status;
+      throw new Error("Resend rejected the email request");
+    }
+  } catch {
     if (!env.isProduction) {
       logTerminalFallback(input);
       return;
     }
     logger.warn(
       {
-        operation: "zeptomail_send_email",
-        providerStatus: axios.isAxiosError(error) ? error.response?.status : undefined,
+        operation: "resend_send_email",
+        providerStatus,
       },
       "Email provider request failed",
     );

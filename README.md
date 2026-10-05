@@ -11,7 +11,7 @@ Production-oriented Node.js/TypeScript backend for the Community Connect Expo ap
 - Paystack payments, transfers, payout webhooks, and account resolution
 - Groq API for low-cost assistant, event-copy, and chat-summary features
 - Socket.IO with a Redis adapter for realtime chat/presence
-- Expo Push Service, Cloudinary, and ZeptoMail
+- Expo Push Service, Cloudinary, and Resend
 - Zod, Helmet, CORS allowlists, HPP, rate limiting, slowdown, body limits, and Pino redaction
 - Swagger/OpenAPI 3.1 at `/api/docs`
 - Secured EJS operations portal at `/admin`
@@ -35,7 +35,7 @@ Required local services:
 
 1. MongoDB. Wallet transfers use Mongo transactions, so production and full financial-flow testing require a replica set or MongoDB Atlas.
 2. Redis. Financial routes fail closed when a distributed lock cannot be acquired.
-3. Provider credentials and configured dashboard settings for Paystack, Cloudinary, ZeptoMail, Groq, Geoapify (for location search), and Expo enhanced push security if enabled.
+3. Provider credentials and configured dashboard settings for Paystack, Cloudinary, Resend, Groq, Geoapify (for location search), and Expo enhanced push security if enabled.
 
 ## Commands
 
@@ -401,7 +401,7 @@ is supported for native clients; an explicit origin must pass the allowlist.
 
 - Groq powers generative AI through `openai/gpt-oss-20b` by default and uses `qwen/qwen3.8-27b` for event moderation with cover-image vision. Event moderation receives only the event public listing data and ticket definitions; short AI session context is encrypted at rest; nearby-event ranking remains local and does not spend model tokens.
 - Expo sends in batches of at most 100, accepts optional enhanced-security access tokens, and records ticket IDs. A production worker should fetch push receipts about 15 minutes later and remove `DeviceNotRegistered` tokens.
-- ZeptoMail payloads are sent server-to-server using the configured send-mail token.
+- Email is sent through Resend using `RESEND_API_KEY`; configure a verified sender domain for production delivery.
 - Cloudinary receives only authenticated, MIME-checked, size-limited in-memory image uploads.
 
 

@@ -41,8 +41,8 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().min(1),
   CLOUDINARY_API_KEY: z.string().min(1),
   CLOUDINARY_API_SECRET: z.string().min(1),
-  ZEPTOMAIL_API_URL: z.string().url().default("https://api.zeptomail.com/v1.1/email"),
-  ZEPTOMAIL_SEND_MAIL_TOKEN: z.string().default(""),
+  RESEND_API_KEY: z.string().default(""),
+
   MAIL_FROM_ADDRESS: z.string().email(),
   MAIL_FROM_NAME: z.string().min(1).default("Community Connect"),
   GROQ_API_KEY: z.string().min(1),
@@ -82,8 +82,8 @@ if (parsed.data.NODE_ENV === "production") {
     throw new Error("EVENT_AUTO_APPROVE_FOR_TESTING cannot be enabled in production.");
   }
 
-  if (!parsed.data.ZEPTOMAIL_SEND_MAIL_TOKEN) {
-    throw new Error("ZEPTOMAIL_SEND_MAIL_TOKEN is required in production.");
+  if (!parsed.data.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is required in production.");
   }
 
   const unsafePlaceholders = [
@@ -92,7 +92,7 @@ if (parsed.data.NODE_ENV === "production") {
     parsed.data.OTP_PEPPER,
     parsed.data.PAYSTACK_SECRET_KEY,
     parsed.data.CLOUDINARY_API_SECRET,
-    parsed.data.ZEPTOMAIL_SEND_MAIL_TOKEN,
+    parsed.data.RESEND_API_KEY,
     parsed.data.GROQ_API_KEY,
     parsed.data.GEOAPIFY_API_KEY,
   ].some((value) => /replace|placeholder|change-me/i.test(value));
