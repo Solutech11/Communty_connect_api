@@ -6,17 +6,31 @@ const intersection = (left: readonly string[], right: readonly string[]): string
   return [...new Set(left.map(normalize))].filter((value) => rightSet.has(value));
 };
 
-export const roommatesCompatible = (left: RoommateAnswers, right: RoommateAnswers): boolean => {
+export const roommatesCoreCompatible = (left: RoommateAnswers, right: RoommateAnswers): boolean => {
   return left.adultConfirmed && right.adultConfirmed
     && !(left.housingMode === "hosting" && right.housingMode === "hosting")
+    && left.acceptableGenders.includes(right.gender) && right.acceptableGenders.includes(left.gender)
+    && (!left.smokes || right.acceptsSmoking) && (!right.smokes || left.acceptsSmoking)
+    && (!left.hasPets || right.acceptsPets) && (!right.hasPets || left.acceptsPets);
+};
+
+export const roommatesCompatible = (left: RoommateAnswers, right: RoommateAnswers): boolean => {
+  return roommatesCoreCompatible(left, right)
     && normalize(left.state) === normalize(right.state)
     && intersection(left.lgas, right.lgas).length > 0
     && Math.max(left.minAnnualRentKobo, right.minAnnualRentKobo)
       <= Math.min(left.maxAnnualRentKobo, right.maxAnnualRentKobo)
-    && left.moveInFrom <= right.moveInTo && right.moveInFrom <= left.moveInTo
-    && left.acceptableGenders.includes(right.gender) && right.acceptableGenders.includes(left.gender)
-    && (!left.smokes || right.acceptsSmoking) && (!right.smokes || left.acceptsSmoking)
-    && (!left.hasPets || right.acceptsPets) && (!right.hasPets || left.acceptsPets);
+    && left.moveInFrom <= right.moveInTo && right.moveInFrom <= left.moveInTo;
+};
+
+export const selectCompatibleOrAvailableRoommates = <T>(
+  owner: RoommateAnswers,
+  available: readonly T[],
+  answersFor: (candidate: T) => RoommateAnswers,
+): { candidates: T[]; usedFallback: boolean } => {
+  const compatible = available.filter((candidate) => roommatesCoreCompatible(owner, answersFor(candidate)));
+  if (compatible.length) return { candidates: compatible, usedFallback: false };
+  return { candidates: [...available], usedFallback: available.length > 0 };
 };
 
 export const intervalOverlap = (a: number, b: number, c: number, d: number): number => {
@@ -41,8 +55,16 @@ export const roommateScore = (
     right.minAnnualRentKobo, right.maxAnnualRentKobo);
   const dates = intervalOverlap(Date.parse(left.moveInFrom), Date.parse(left.moveInTo),
     Date.parse(right.moveInFrom), Date.parse(right.moveInTo));
-  const reasons = ["Compatible area", "Overlapping rent budget", "Compatible move-in dates"];
+  const sameState = normalize(left.state) === normalize(right.state);
+  const sameArea = sameState && intersection(left.lgas, right.lgas).length > 0;
+  const area = sameArea ? 1 : sameState ? 0.5 : 0;
+  const reasons = [
+    sameArea ? "Compatible area" : sameState ? "Same state" : "Different area",
+    rent > 0 ? "Overlapping rent budget" : "Different rent budget",
+    dates > 0 ? "Compatible move-in dates" : "Different move-in dates",
+  ];
   if (agreements >= 2) reasons.push("Similar living habits");
   if (shared.length) reasons.push("Shared interests and hobbies");
-  return { score: Math.round(agreements / 4 * 40 + tags * 30 + rent * 20 + dates * 10), reasons };
+  if (!roommatesCoreCompatible(left, right)) reasons.push("Some roommate preferences differ");
+  return { score: Math.round(agreements / 4 * 35 + tags * 25 + area * 10 + rent * 20 + dates * 10), reasons };
 };

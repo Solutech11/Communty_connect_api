@@ -4,7 +4,7 @@ import type { Request, Response } from "express";
 import { Types } from "mongoose";
 import "./test-env";
 import { completeRoommateProfileSchema, roommateDraftSchema, contactConsentSchema } from "../schemas/roommate.schemas";
-import { roommatesCompatible, roommateScore, intervalOverlap } from "../utils/roommateMatching.utils";
+import { roommatesCompatible, roommatesCoreCompatible, roommateScore, intervalOverlap, selectCompatibleOrAvailableRoommates } from "../utils/roommateMatching.utils";
 import { roommateExampleAnswers } from "../docs/roommate-contracts";
 import { contactExchangeAllowed, contactFingerprint } from "../utils/roommateContacts.utils";
 import { RoommateProfileModel } from "../models/Roommate/RoommateProfile.model";
@@ -56,13 +56,39 @@ test("gender, smoking and pets require reciprocal compatibility", () => {
   assert.equal(roommatesCompatible({ ...left, hasPets: true }, { ...left, acceptsPets: false }), false);
 });
 
+test("roommate discovery softens area, budget and date matches before falling back to any available profile", () => {
+  const owner = answers();
+  const compatible = { id: "compatible", answers: owner };
+  const softened: typeof compatible = { id: "softened", answers: {
+    ...owner, state: "Abuja", lgas: ["Gwagwalada"],
+    minAnnualRentKobo: owner.maxAnnualRentKobo + 1, maxAnnualRentKobo: owner.maxAnnualRentKobo + 100,
+    moveInFrom: "2028-01-01", moveInTo: "2028-03-31",
+  } };
+  const preferenceMismatch: typeof compatible = { id: "preference-mismatch", answers: { ...owner, acceptableGenders: ["woman"] } };
+  const candidates = [preferenceMismatch, softened];
+  assert.equal(roommatesCoreCompatible(owner, softened.answers), true);
+  assert.equal(roommatesCompatible(owner, softened.answers), false);
+
+  const preferred = selectCompatibleOrAvailableRoommates(owner, candidates, (candidate) => candidate.answers);
+  assert.deepEqual(preferred.candidates, [softened]);
+  assert.equal(preferred.usedFallback, false);
+
+  const fallback = selectCompatibleOrAvailableRoommates(owner, [preferenceMismatch], (candidate) => candidate.answers);
+  assert.deepEqual(fallback.candidates, [preferenceMismatch]);
+  assert.equal(fallback.usedFallback, true);
+
+  const empty = selectCompatibleOrAvailableRoommates(owner, [] as typeof candidates, (candidate) => candidate.answers);
+  assert.deepEqual(empty.candidates, []);
+  assert.equal(empty.usedFallback, false);
+});
+
 test("scoring is explainable, normalized and handles absent interests", () => {
   const left = answers();
   assert.equal(roommateScore(left, left, ["Reading", "reading"], ["reading"]).score, 100);
-  assert.equal(roommateScore(left, left, [], []).score, 70);
+  assert.equal(roommateScore(left, left, [], []).score, 75);
   const different = { ...left, cleanliness: "relaxed" as const, sleepSchedule: "late" as const, guests: "often" as const, socialPreference: "quiet" as const };
   const result = roommateScore(left, different, ["reading"], ["gaming"]);
-  assert.equal(result.score, 30);
+  assert.equal(result.score, 40);
   assert.ok(!result.reasons.includes("Shared interests and hobbies"));
   assert.equal(intervalOverlap(10, 10, 10, 10), 1);
   assert.equal(intervalOverlap(5, 15, 10, 10), 1);

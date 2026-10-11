@@ -228,7 +228,7 @@ See [matching, consent, deployment and integration tests](docs/roommate-matching
 | GET | `/roommates/profiles/me` | Yes | My roommate profile or null |
 | PUT | `/roommates/profiles/me` | Yes | Replace my questionnaire answers |
 | PATCH | `/roommates/profiles/me/visibility` | Yes | Activate, pause or resume discovery |
-| GET | `/roommates/candidates` | Yes | Ranked, paginated compatible profiles |
+| GET | `/roommates/candidates` | Yes | Ranks location, rent and dates softly; shows available profiles if no preferred matches exist |
 | PUT | `/roommates/decisions/{userId}` | Yes | Idempotent like or pass |
 | GET | `/roommates/connections` | Yes | Paginated mutual connects |
 | GET | `/roommates/connections/{id}` | Yes | Authorized connect detail |

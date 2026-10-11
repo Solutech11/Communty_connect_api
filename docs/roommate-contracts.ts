@@ -8,7 +8,7 @@ const definitions: Array<[EndpointDefinition["method"], string, string, boolean?
   ["get", "/roommates/profiles/me", "Get my roommate profile"],
   ["put", "/roommates/profiles/me", "Save my roommate profile", true],
   ["patch", "/roommates/profiles/me/visibility", "Activate or pause discovery", true],
-  ["get", "/roommates/candidates", "Discover compatible roommates"],
+  ["get", "/roommates/candidates", "Find compatible or available roommates"],
   ["put", "/roommates/decisions/{userId}", "Like or pass a candidate", true],
   ["get", "/roommates/connections", "List roommate connects"],
   ["get", "/roommates/connections/{id}", "Get a roommate connect"],
@@ -25,7 +25,9 @@ const definitions: Array<[EndpointDefinition["method"], string, string, boolean?
 ];
 export const roommateEndpoints: EndpointDefinition[] = definitions.map(([method, path, summary, requestBody]) => ({
   method, path, summary, requestBody, tag: path.startsWith("/roommates") ? "Roommates" : "Users", auth: true,
-  description: summary + ". Enforces active authentication, ownership, visibility, and either-direction blocks. Acceptance makes both profiles private. Contacts require separate mutual consent. Budgets are personal annual rent shares in integer kobo, not payments.",
+  description: path === "/roommates/candidates"
+    ? "Uses adult confirmation, compatible hosting modes, reciprocal gender preferences, and smoking/pet preferences to identify preferred profiles. Location, annual rent overlap, and move-in dates influence ranking instead of excluding a profile. If no preferred profile is available, returns other valid, discoverable profiles ranked by overlap. Excludes inactive, blocked, previously decided, connected, incomplete, or expired profiles."
+    : summary + ". Enforces active authentication, ownership, visibility, and either-direction blocks. Acceptance makes both profiles private. Contacts require separate mutual consent. Budgets are personal annual rent shares in integer kobo, not payments.",
 }));
 
 const id = "507f1f77bcf86cd799439011";

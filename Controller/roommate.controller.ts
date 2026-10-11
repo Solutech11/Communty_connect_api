@@ -9,7 +9,7 @@ import { RoommateRequestModel } from "../models/Roommate/RoommateRequest.model";
 import { completeRoommateProfileSchema, roommateOptions } from "../schemas/roommate.schemas";
 import { AppError } from "../utils/AppError";
 import { sendSuccess } from "../utils/response.utils";
-import { roommateScore, roommatesCompatible } from "../utils/roommateMatching.utils";
+import { roommateScore, selectCompatibleOrAvailableRoommates } from "../utils/roommateMatching.utils";
 import { blockedUserIds, pairKeyFor, requireUnblocked, withUserLocks } from "../utils/userBlock.utils";
 import { withRedisLock } from "../utils/redisLock.utils";
 import { ensureDirectConversation } from "../utils/directConversation.utils";
@@ -143,21 +143,28 @@ export const listRoommateCandidates = async (request: Request, response: Respons
     ...connections.flatMap((item) => item.participantIds.map(String))]);
   const profiles = await RoommateProfileModel.find({
     visibility: "discoverable", userId: { $nin: [...excluded] },
-    state: new RegExp(`^${answers.state.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
   }).lean();
   const users = await UserModel.find({ _id: { $in: profiles.map((item) => item.userId) }, status: "active" })
     .select(publicUserFields).lean();
   const usersById = new Map(users.map((item) => [item._id.toString(), item]));
-  const candidates = profiles.flatMap((profile) => {
+  const available = profiles.flatMap((profile) => {
     const targetUser = usersById.get(profile.userId.toString());
     const parsed = completeRoommateProfileSchema.safeParse(Object.fromEntries(profileFields.map((key) =>
       [key, (profile as unknown as Record<string, unknown>)[key]])));
-    if (!targetUser || !parsed.success || parsed.data.moveInTo < new Date().toISOString().slice(0, 10)
-      || !roommatesCompatible(answers, parsed.data)) return [];
-    return [{ user: targetUser, profile: profileDto(profile as unknown as Record<string, unknown>),
+    if (!targetUser || !parsed.success || parsed.data.moveInTo < new Date().toISOString().slice(0, 10)) return [];
+    return [{ user: targetUser, answers: parsed.data, profile: profileDto(profile as unknown as Record<string, unknown>),
       ...roommateScore(answers, parsed.data, [...(user?.interests || []), ...(user?.hobbies || [])],
         [...targetUser.interests, ...targetUser.hobbies]) }];
-  }).sort((a, b) => b.score - a.score || a.user._id.toString().localeCompare(b.user._id.toString()));
+  });
+  const selection = selectCompatibleOrAvailableRoommates(answers, available, (candidate) => candidate.answers);
+  const candidates = selection.candidates.map((candidate) => ({
+    user: candidate.user,
+    profile: candidate.profile,
+    score: candidate.score,
+    reasons: selection.usedFallback
+      ? [...candidate.reasons, "No compatible matches; showing available profiles"]
+      : candidate.reasons,
+  })).sort((a, b) => b.score - a.score || a.user._id.toString().localeCompare(b.user._id.toString()));
   const page = Number(request.query.page);
   const limit = Number(request.query.limit);
   return sendSuccess(response, 200, "Roommate candidates retrieved", {
@@ -183,7 +190,14 @@ export const decideRoommate = async (request: Request, response: Response): Prom
       const left = profiles.find((profile) => profile.userId.toString() === userId);
       const right = profiles.find((profile) => profile.userId.toString() === targetId);
       const activeCount = await UserModel.countDocuments({ _id: { $in: [userId, targetId] }, status: "active" }).session(session);
-      if (!left || !right || activeCount !== 2 || !roommatesCompatible(requireComplete(left.toObject()), requireComplete(right.toObject()))) {
+      const today = new Date().toISOString().slice(0, 10);
+      const parseAnswers = (profile: typeof left) => profile && completeRoommateProfileSchema.safeParse(
+        Object.fromEntries(profileFields.map((key) => [key, (profile.toObject() as Record<string, unknown>)[key]])),
+      );
+      const leftAnswers = parseAnswers(left);
+      const rightAnswers = parseAnswers(right);
+      if (!left || !right || activeCount !== 2 || leftAnswers?.success !== true || rightAnswers?.success !== true
+        || leftAnswers.data.moveInTo < today || rightAnswers.data.moveInTo < today) {
         throw new AppError(409, "This profile is no longer available for matching", "ROOMMATE_CANDIDATE_UNAVAILABLE");
       }
       await RoommateDecisionModel.create([{ userId, targetId, action: request.body.action }], { session });
