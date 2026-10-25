@@ -30,60 +30,75 @@ export const parseCookies = (request: Request): Record<string, string> => {
   return cookies;
 };
 
+export const clearAdminSessionCookies = (response: Response): void => {
+  response.clearCookie(ADMIN_SESSION_COOKIE, { path: "/admin" });
+  response.clearCookie(ADMIN_CSRF_COOKIE, { path: "/admin" });
+};
+
+export const getAuthenticatedAdmin = async (
+  request: Request,
+): Promise<Request["admin"]> => {
+  const cookies = parseCookies(request);
+  const token = cookies[ADMIN_SESSION_COOKIE];
+  const csrfToken = cookies[ADMIN_CSRF_COOKIE];
+
+  if (!token || !csrfToken) {
+    return undefined;
+  }
+
+  const session = await AdminSessionModel.findOne({
+    tokenHash: sha256(token),
+    revokedAt: { $exists: false },
+    expiresAt: { $gt: new Date() },
+  }).select("+csrfTokenHash");
+
+  // IPs can change between requests behind proxies or on mobile networks.
+  // Keep the login IP for auditing; authenticate with the session secrets and browser.
+  if (
+    !session
+    || !secureEqual(session.csrfTokenHash, sha256(csrfToken))
+    || !secureEqual(
+      session.userAgentHash,
+      sha256(request.header("user-agent") || "unknown"),
+    )
+  ) {
+    return undefined;
+  }
+
+  const admin = await AdminModel.findOne({ _id: session.adminId, active: true }).lean();
+  const user = admin
+    ? await UserModel.findOne({ _id: admin.userId, role: "admin", status: "active" }).lean()
+    : null;
+
+  if (!admin || !user) {
+    return undefined;
+  }
+
+  return {
+    adminId: admin._id.toString(),
+    userId: user._id.toString(),
+    sessionId: session._id.toString(),
+    csrfToken,
+    permissions: admin.permissions,
+  };
+};
+
 export const authenticateAdminPage = async (
   request: Request,
   response: Response,
   next: NextFunction,
 ): Promise<void> => {
+  response.setHeader("Cache-Control", "no-store");
+
   try {
-    const cookies = parseCookies(request);
-    const token = cookies[ADMIN_SESSION_COOKIE];
-    const csrfToken = cookies[ADMIN_CSRF_COOKIE];
-
-    if (!token || !csrfToken) {
+    const admin = await getAuthenticatedAdmin(request);
+    if (!admin) {
+      clearAdminSessionCookies(response);
       response.redirect("/admin/login");
       return;
     }
 
-    const session = await AdminSessionModel.findOne({
-      tokenHash: sha256(token),
-      revokedAt: { $exists: false },
-      expiresAt: { $gt: new Date() },
-    }).select("+csrfTokenHash");
-
-    if (
-      !session
-      || !secureEqual(session.csrfTokenHash, sha256(csrfToken))
-      || !secureEqual(session.ipHash, sha256(request.ip || "unknown"))
-      || !secureEqual(
-        session.userAgentHash,
-        sha256(request.header("user-agent") || "unknown"),
-      )
-    ) {
-      response.clearCookie(ADMIN_SESSION_COOKIE, { path: "/admin" });
-      response.clearCookie(ADMIN_CSRF_COOKIE, { path: "/admin" });
-      response.redirect("/admin/login");
-      return;
-    }
-
-    const admin = await AdminModel.findOne({ _id: session.adminId, active: true }).lean();
-    const user = admin
-      ? await UserModel.findOne({ _id: admin.userId, role: "admin", status: "active" }).lean()
-      : null;
-
-    if (!admin || !user) {
-      response.redirect("/admin/login");
-      return;
-    }
-
-    request.admin = {
-      adminId: admin._id.toString(),
-      userId: user._id.toString(),
-      sessionId: session._id.toString(),
-      csrfToken,
-      permissions: admin.permissions,
-    };
-    response.setHeader("Cache-Control", "no-store");
+    request.admin = admin;
     next();
   } catch (error) {
     next(error);

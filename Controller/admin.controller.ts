@@ -15,6 +15,8 @@ import {
   ADMIN_CSRF_COOKIE,
   ADMIN_LOGIN_CSRF_COOKIE,
   ADMIN_SESSION_COOKIE,
+  clearAdminSessionCookies,
+  getAuthenticatedAdmin,
   parseCookies,
 } from "../middleware/admin.middleware";
 import { passwordSchema } from "../schemas/common.schemas";
@@ -89,12 +91,17 @@ export const renderAdminLogin = async (
   request: Request,
   response: Response,
 ): Promise<void> => {
-  if (parseCookies(request)[ADMIN_SESSION_COOKIE]) {
+  response.setHeader("Cache-Control", "no-store");
+
+  if (await getAuthenticatedAdmin(request)) {
     response.redirect("/admin");
     return;
   }
 
-  response.setHeader("Cache-Control", "no-store");
+  const cookies = parseCookies(request);
+  if (cookies[ADMIN_SESSION_COOKIE] || cookies[ADMIN_CSRF_COOKIE]) {
+    clearAdminSessionCookies(response);
+  }
   response.render("admin/login", {
     title: "Admin sign in",
     csrfToken: issueLoginCsrf(response),
@@ -176,8 +183,7 @@ export const logoutAdmin = async (request: Request, response: Response): Promise
     { _id: request.admin?.sessionId, revokedAt: { $exists: false } },
     { revokedAt: new Date() },
   );
-  response.clearCookie(ADMIN_SESSION_COOKIE, { path: "/admin" });
-  response.clearCookie(ADMIN_CSRF_COOKIE, { path: "/admin" });
+  clearAdminSessionCookies(response);
   response.redirect("/admin/login");
 };
 
