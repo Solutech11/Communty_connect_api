@@ -9,7 +9,7 @@
 </head>
 <body>
   <div class="admin-layout">
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="Admin workspace">
       <a class="brand" href="/admin" aria-label="Community Connect Admin home">
         <img class="brand-logo" src="/admin/assets/community-connect-mark.svg" alt="">
         <span><strong>Community Connect</strong><small>Admin workspace</small></span>
@@ -24,7 +24,17 @@
     <main class="main-content">
       <header class="mobile-topbar">
         <a class="brand" href="/admin"><img class="brand-logo" src="/admin/assets/community-connect-mark.svg" alt=""><strong>Community Connect</strong></a>
-        <details class="mobile-drawer"><summary>Menu <span aria-hidden="true">☰</span></summary><%- include("navigation", { activeTab, permissions }) %></details>
+        <details class="mobile-drawer">
+          <summary aria-label="Toggle admin navigation">Menu <span aria-hidden="true">☰</span></summary>
+          <div class="mobile-drawer-panel">
+            <p class="eyebrow">Admin workspace</p>
+            <%- include("navigation", { activeTab, permissions }) %>
+            <form method="post" action="/admin/logout" class="mobile-sign-out-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button button-ghost" type="submit">Sign out</button>
+            </form>
+          </div>
+        </details>
       </header>
       <header class="page-header">
         <div><p class="eyebrow"><%= sectionLabel %></p><h1><%= heading %></h1><p class="page-subtitle"><%= subtitle %></p></div>
