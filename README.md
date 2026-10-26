@@ -264,7 +264,7 @@ See [matching, consent, deployment and integration tests](docs/roommate-matching
 
 | Method | Path | Auth | Purpose |
 |---|---|---:|---|
-| GET | `/notifications` | Yes | Filter notifications and unread count |
+| GET | `/notifications` | Yes | Filter in-app notifications and a private log of successful account activity; includes pagination and unread count |
 | PATCH | `/notifications/read-all` | Yes | Mark all owned notifications read |
 | PATCH | `/notifications/{id}/read` | Yes | Mark one owned notification read |
 | POST | `/disputes` | Yes | Open dispute with owned transaction check |

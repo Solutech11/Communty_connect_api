@@ -10,6 +10,8 @@ import { createOtp, hashOtp, secureEqual, sha256 } from "../utils/crypto.utils";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt.utils";
 import { otpEmailTemplate, sendEmail } from "../utils/mailer.utils";
 import { sendSuccess } from "../utils/response.utils";
+import { createAppAndEmailNotification } from "../utils/notificationService.utils";
+import { recordUserActivity } from "../utils/userActivity.utils";
 
 const buildWalletNumber = (): string => {
   const random = Math.floor(100_000_000 + Math.random() * 900_000_000);
@@ -149,6 +151,15 @@ export const verifyEmail = async (request: Request, response: Response): Promise
   await Promise.all([record.save(), user.save()]);
 
   const session = await createSession(user, request);
+  void createAppAndEmailNotification({
+    userId: user._id.toString(),
+    type: "account_welcome",
+    title: `Welcome to ${env.APP_NAME}`,
+    body: "Your email is verified. Explore communities, meet people, and find your next event.",
+    dedupeKey: "account-welcome",
+    data: { route: "Dashboard" },
+  });
+
   return sendSuccess(response, 200, "Email verified", { user, session });
 };
 
@@ -186,6 +197,12 @@ export const login = async (request: Request, response: Response): Promise<Respo
   await user.save();
 
   const session = await createSession(user, request);
+  void recordUserActivity({
+    userId: user._id.toString(),
+    category: "account",
+    title: "Signed in",
+    body: "You signed in to your Community Connect account.",
+  });
   user.passwordHash = undefined as never;
   return sendSuccess(response, 200, "Signed in", { user, session });
 };
@@ -238,6 +255,15 @@ export const logout = async (request: Request, response: Response): Promise<Resp
     );
   } catch {
     // Logout is intentionally idempotent and does not reveal token validity.
+  }
+
+  if (request.auth?.id) {
+    void recordUserActivity({
+      userId: request.auth.id,
+      category: "account",
+      title: "Signed out",
+      body: "You signed out of your Community Connect account.",
+    });
   }
 
   return sendSuccess(response, 200, "Signed out");
@@ -304,6 +330,13 @@ export const resetPassword = async (request: Request, response: Response): Promi
     record.save(),
     RefreshTokenModel.updateMany({ userId: user._id, revokedAt: { $exists: false } }, { revokedAt: new Date() }),
   ]);
+
+  void recordUserActivity({
+    userId: user._id.toString(),
+    category: "account",
+    title: "Password changed",
+    body: "The password for your account was updated.",
+  });
 
   return sendSuccess(response, 200, "Password reset. Sign in with your new password.");
 };

@@ -14,8 +14,10 @@ import walletRouter from "./wallet/Wallet.route";
 import webhookRouter from "./webhooks/Webhook.route";
 import ticketRouter from "./tickets/Ticket.route";
 import roommateRouter from "./roommates/Roommate.route";
+import { userActivityAudit } from "../middleware/userActivity.middleware";
 
 const router = Router();
+router.use(userActivityAudit);
 router.use("/auth", authRouter);
 router.use("/users", userRouter);
 router.use("/roommates", roommateRouter);
