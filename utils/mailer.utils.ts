@@ -1,5 +1,11 @@
 import { env } from "../Config/env";
 import { AppError } from "./AppError";
+import {
+  renderBrandedEmail,
+  renderEmailBulletList,
+  renderEmailCode,
+  renderEmailHighlight,
+} from "./emailTemplate.utils";
 import { logger } from "./logger.utils";
 
 const RESEND_EMAILS_API_URL = "https://api.resend.com/emails";
@@ -33,6 +39,24 @@ const logTerminalFallback = (input: { toEmail: string; subject: string; html: st
   }, "Email captured by terminal fallback; content redacted");
 };
 
+const htmlToPlainText = (html: string): string => html
+  .replace(/<style[\s\S]*?<\/style>/gi, " ")
+  .replace(/<head[\s\S]*?<\/head>/gi, " ")
+  .replace(/<\/(p|h[1-6]|tr|li|div|table)>/gi, "\n")
+  .replace(/<br\s*\/?>/gi, "\n")
+  .replace(/<[^>]+>/g, " ")
+  .replace(/&nbsp;/gi, " ")
+  .replace(/&zwnj;|&shy;/gi, "")
+  .replace(/&amp;/gi, "&")
+  .replace(/&lt;/gi, "<")
+  .replace(/&gt;/gi, ">")
+  .replace(/&quot;/gi, "\"")
+  .replace(/&#0*39;/gi, "'")
+  .replace(/[ \t]+/g, " ")
+  .replace(/ *\n */g, "\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+
 export const sendEmail = async (input: {
   toEmail: string;
   toName: string;
@@ -61,6 +85,7 @@ export const sendEmail = async (input: {
         to: [formatMailbox(input.toName, input.toEmail)],
         subject: input.subject,
         html: input.html,
+        text: htmlToPlainText(input.html),
       }),
       signal: AbortSignal.timeout(15_000),
     });
@@ -86,24 +111,17 @@ export const sendEmail = async (input: {
 };
 
 export const otpEmailTemplate = (name: string, otp: string, purpose: string): string => {
-  return `
-    <div style="font-family:Arial,sans-serif;color:#102018;line-height:1.6">
-      <h2>${env.APP_NAME}</h2>
-      <p>Hello ${name},</p>
-      <p>Your ${purpose} code is:</p>
-      <p style="font-size:28px;font-weight:700;letter-spacing:6px">${otp}</p>
-      <p>This code expires in 10 minutes. If you did not request it, ignore this email.</p>
-    </div>
-  `;
-};
+  const isVerification = purpose === "email verification";
 
-const escapeHtml = (value: string): string => {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  return renderBrandedEmail({
+    preheader: isVerification ? "Your email verification code is ready." : "Your account security code is ready.",
+    eyebrow: "ACCOUNT SECURITY",
+    heading: isVerification ? "Verify your email" : "Reset your password",
+    greetingName: name,
+    intro: `Enter this one-time code to complete your ${purpose}.`,
+    contentHtml: renderEmailCode(otp),
+    footerNote: "This code expires in 10 minutes. If you did not request it, you can ignore this email. Never share a security code with anyone.",
+  });
 };
 
 export const eventModerationEmailTemplate = (input: {
@@ -112,32 +130,29 @@ export const eventModerationEmailTemplate = (input: {
   verdict: "approved" | "rejected";
   reasons: string[];
 }): string => {
-  const safeName = escapeHtml(input.name);
-  const safeTitle = escapeHtml(input.eventTitle);
-
   if (input.verdict === "approved") {
-    return `
-      <div style="font-family:Arial,sans-serif;color:#102018;line-height:1.6">
-        <h2>${escapeHtml(env.APP_NAME)}</h2>
-        <p>Hello ${safeName},</p>
-        <p>Your event <strong>${safeTitle}</strong> passed our automatic review and is now published.</p>
-        <p>We reviewed the event information, cover image where provided, ticket pricing, and Community Connect safety guidelines.</p>
-      </div>
-    `;
+    return renderBrandedEmail({
+      preheader: "Your event has passed review and is now published.",
+      eyebrow: "EVENT UPDATE",
+      heading: "Your event is now live",
+      greetingName: input.name,
+      intro: "Good news — your event passed review and is published for the community.",
+      contentHtml: renderEmailHighlight("Published event", input.eventTitle),
+      footerNote: "You can view and manage your event from the Community Connect app.",
+    });
   }
 
-  const reasonItems = input.reasons
-    .map((reason) => `<li>${escapeHtml(reason)}</li>`)
-    .join("");
+  const reasons = input.reasons.length > 0
+    ? input.reasons
+    : ["Review your event details and make sure they follow our community safety guidelines."];
 
-  return `
-    <div style="font-family:Arial,sans-serif;color:#102018;line-height:1.6">
-      <h2>${escapeHtml(env.APP_NAME)}</h2>
-      <p>Hello ${safeName},</p>
-      <p>We could not publish <strong>${safeTitle}</strong> after its automatic review.</p>
-      <p>Please review the following items, update your event, and submit it again:</p>
-      <ul>${reasonItems}</ul>
-      <p>We check event information, cover images, ticket pricing, and our community safety guidelines. Sexual or explicit content, harmful or illegal activity, scams, and misleading information are not allowed.</p>
-    </div>
-  `;
+  return renderBrandedEmail({
+    preheader: "Please update your event before it can be published.",
+    eyebrow: "EVENT UPDATE",
+    heading: "Your event needs an update",
+    greetingName: input.name,
+    intro: "We could not publish this event yet. Please address the items below, then update and resubmit it.",
+    contentHtml: `${renderEmailHighlight("Event", input.eventTitle)}<p style="margin:20px 0 8px;color:#182b21;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;line-height:1.5">Items to review</p>${renderEmailBulletList(reasons)}<p style="margin:16px 0 0;color:#66786e;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.65">Events must follow our community safety guidelines and avoid explicit or harmful content, illegal activity, scams, and misleading information.</p>`,
+    footerNote: "Update the event in Community Connect and submit it for review again.",
+  });
 };

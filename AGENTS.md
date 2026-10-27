@@ -89,3 +89,23 @@ yarn build
 ```
 
 If an integration cannot be exercised because credentials, a Mongo replica set, Redis, Paystack webhook registration, or an external dashboard setting is missing, state that clearly. Never weaken a security check to make a local demo pass.
+
+## Email Design and Implementation
+
+Every new or updated backend email MUST follow the shared Community Connect email layout. Do not create one-off raw HTML layouts in controllers or services. Use `utils/emailTemplate.utils.ts` (`renderBrandedEmail` and its content helpers) for a consistent branded header, single-column card, readable hierarchy, generous spacing, and clear footer. If the shared layout needs to change, update the shared renderer so all mail stays consistent.
+
+Email layout requirements:
+
+- Design for narrow mobile screens first, then desktop. Keep the message to one column, use responsive widths, readable body text, and comfortable spacing.
+- Use semantic table-based structure and inline styles for broad email-client support. Keep essential content visible when images or remote styles are blocked; any added image must include useful alt text.
+- Add a concise preheader that complements the subject. Put the reason for the message first, then the details and the next step. Keep one clear, relevant call to action when a valid destination is available; make its tap target at least 44 by 44 pixels.
+- Use the Community Connect green and warm-gold brand treatment, high-contrast text, and a restrained palette. Keep transactional emails focused on the event, account action, payment, or notification that caused them; do not add unrelated promotion.
+- Escape every dynamic value before inserting it into HTML. Keep OTPs, payment details, and account data out of logs. Send both HTML and a readable plain-text alternative.
+- Include only footer information that is accurate for that message. Do not invent support addresses, unsubscribe flows, URLs, or deep links.
+
+Use these email-design references as inspiration when changing the shared layout:
+
+- [Mailchimp transactional email guidance](https://mailchimp.com/resources/transactional-email-examples/)
+- [Mailchimp mobile-friendliness reference](https://templates.mailchimp.com/design/mobile-friendliness/)
+- [Mailchimp email accessibility guidance](https://mailchimp.com/resources/accessibility-in-email-marketing/)
+- [Mailchimp layout and visual hierarchy guidance](https://mailchimp.com/resources/best-email-layout/)

@@ -1,14 +1,7 @@
 import { UserModel } from "../models/Auth/User.model";
-import { env } from "../Config/env";
 import { sendEmail } from "./mailer.utils";
 import { logger } from "./logger.utils";
-
-const escapeHtml = (value: string): string => value
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/"/g, "&quot;")
-  .replace(/'/g, "&#039;");
+import { renderBrandedEmail, renderEmailDetails, renderEmailHighlight } from "./emailTemplate.utils";
 
 export const sendTicketCheckInEmail = async (input: {
   userId: string;
@@ -26,29 +19,28 @@ export const sendTicketCheckInEmail = async (input: {
       return;
     }
 
-    const eventTitle = escapeHtml(input.eventTitle);
-    const orderNumber = escapeHtml(input.orderNumber);
-    const checkedInAt = escapeHtml(input.checkedInAt.toLocaleString("en-NG", {
+    const checkedInAt = input.checkedInAt.toLocaleString("en-NG", {
       dateStyle: "medium",
       timeStyle: "short",
       timeZone: "Africa/Lagos",
-    }));
-    const firstName = escapeHtml(user.firstName);
+    });
 
     await sendEmail({
       toEmail: user.email,
       toName: user.firstName,
       subject: "Your event check-in is confirmed",
-      html: `
-        <div style="font-family:Arial,sans-serif;color:#102018;line-height:1.6;max-width:560px;margin:0 auto">
-          <h2>${escapeHtml(env.APP_NAME)}</h2>
-          <p>Hello ${firstName},</p>
-          <h3>Your check-in is confirmed</h3>
-          <p>You have been checked in for <strong>${eventTitle}</strong>.</p>
-          <p>Ticket order: ${orderNumber}<br>Check-in time: ${checkedInAt}</p>
-          <p>Enjoy the event!</p>
-        </div>
-      `,
+      html: renderBrandedEmail({
+        preheader: `Check-in confirmed for ${input.eventTitle}.`,
+        eyebrow: "EVENT CHECK-IN",
+        heading: "You're checked in",
+        greetingName: user.firstName,
+        intro: "Your arrival has been recorded. Enjoy the event!",
+        contentHtml: `${renderEmailHighlight("Event", input.eventTitle)}${renderEmailDetails([
+          { label: "Ticket order", value: input.orderNumber },
+          { label: "Check-in time", value: checkedInAt },
+        ])}`,
+        footerNote: "Keep this confirmation for your records.",
+      }),
     });
   } catch {
     // Email delivery must not undo an already recorded check-in.

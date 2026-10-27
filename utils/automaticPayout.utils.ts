@@ -11,6 +11,7 @@ import { AppError } from "./AppError";
 import { logger } from "./logger.utils";
 import { formatNaira } from "./paymentEmail.utils";
 import { sendEmail } from "./mailer.utils";
+import { renderBrandedEmail, renderEmailDetails, renderEmailHighlight } from "./emailTemplate.utils";
 import { initiatePaystackBulkTransfers, verifyPaystackTransfer, type PaystackTransferData } from "./paystack.utils";
 import { nextPayoutMidnight, payoutCycle, payoutMidnight, PAYOUT_DAY_MS, MIN_AUTOMATIC_PAYOUT_KOBO } from "./payoutSchedule.utils";
 import { redisClient } from "../DB/redis";
@@ -261,7 +262,18 @@ export const sendPayoutReminders = async (now = new Date()): Promise<void> => {
       await sendEmail({
         toEmail: user.email, toName: user.firstName,
         subject: "Link your bank account to receive your wallet payout",
-        html: `<div style="font-family:Arial,sans-serif;line-height:1.6"><h2>Your daily payout is pending</h2><p>It is time for your midnight payout, but you have no linked bank account.</p><p>Your ${formatNaira(wallet.availableBalanceKobo)} remains safely in your wallet.</p><p>Open Community Connect, go to My Wallet, and select Link bank account. We will pay your funds to that account at the next midnight payout (Africa/Lagos).</p></div>`,
+        html: renderBrandedEmail({
+          preheader: "Your wallet balance is ready for payout when you link a bank account.",
+          eyebrow: "WALLET PAYOUT",
+          heading: "Your payout is waiting",
+          greetingName: user.firstName,
+          intro: "Your wallet has funds available, but there is no bank account linked to receive your payout.",
+          contentHtml: `${renderEmailHighlight("Available balance", formatNaira(wallet.availableBalanceKobo))}${renderEmailDetails([
+            { label: "Next step", value: "Open My Wallet and choose Link bank account" },
+            { label: "Payout timing", value: "Next scheduled midnight payout (Africa/Lagos)" },
+          ])}`,
+          footerNote: "Your funds remain safely in your Community Connect wallet until they are paid out.",
+        }),
       });
       await PayoutReminderModel.updateOne({ _id: reminder._id }, { status: "sent" });
     } catch {

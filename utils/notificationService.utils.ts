@@ -3,14 +3,7 @@ import { UserModel } from "../models/Auth/User.model";
 import { sendExpoPushNotifications } from "./expoNotification.utils";
 import { logger } from "./logger.utils";
 import { sendEmail } from "./mailer.utils";
-import { env } from "../Config/env";
-
-const escapeHtml = (value: string): string => value
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/\"/g, "&quot;")
-  .replace(/'/g, "&#039;");
+import { renderBrandedEmail } from "./emailTemplate.utils";
 
 export const createNotification = async (input: {
   userId: string;
@@ -106,14 +99,19 @@ export const createAppAndEmailNotification = async (input: Parameters<typeof cre
         return;
       }
 
-      const title = escapeHtml(input.title);
-      const body = escapeHtml(input.body);
-      const name = escapeHtml(user.firstName);
       await sendEmail({
         toEmail: user.email,
         toName: user.firstName,
         subject: input.title,
-        html: `<div style="font-family:Arial,sans-serif;color:#102018;line-height:1.6"><h2>${escapeHtml(env.APP_NAME)}</h2><p>Hello ${name},</p><h3>${title}</h3><p>${body}</p><p>Open the Community Connect app to view this update.</p></div>`,
+        html: renderBrandedEmail({
+          preheader: input.body.slice(0, 120),
+          eyebrow: "COMMUNITY CONNECT UPDATE",
+          heading: input.title,
+          greetingName: user.firstName,
+          intro: input.body,
+          closing: "Open the Community Connect app to view this update.",
+          footerNote: "This message keeps you up to date about activity in your account.",
+        }),
       });
       await NotificationModel.updateOne({ _id: notification._id }, {
         $set: { "emailDelivery.status": "sent", "emailDelivery.sentAt": new Date() },

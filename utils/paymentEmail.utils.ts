@@ -1,7 +1,7 @@
 import { UserModel } from "../models/Auth/User.model";
-import { env } from "../Config/env";
 import { logger } from "./logger.utils";
 import { sendEmail } from "./mailer.utils";
+import { renderBrandedEmail, renderEmailDetails, renderEmailHighlight } from "./emailTemplate.utils";
 
 export interface PaymentReceiptEmailInput {
   userId: string;
@@ -11,15 +11,6 @@ export interface PaymentReceiptEmailInput {
   amountLabel?: string;
   details: Array<{ label: string; value: string }>;
 }
-
-const escapeHtml = (value: string): string => {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-};
 
 export const formatNaira = (amountKobo: number): string => {
   return new Intl.NumberFormat("en-NG", {
@@ -37,25 +28,15 @@ const paymentReceiptTemplate = (input: {
   amountLabel: string;
   details: PaymentReceiptEmailInput["details"];
 }): string => {
-  const detailRows = input.details
-    .map(({ label, value }) => {
-      return `<tr><td style="padding:8px 12px;color:#526158">${escapeHtml(label)}</td><td style="padding:8px 12px;text-align:right;font-weight:600">${escapeHtml(value)}</td></tr>`;
-    })
-    .join("");
-
-  return `
-    <div style="font-family:Arial,sans-serif;color:#102018;line-height:1.6;max-width:560px;margin:0 auto">
-      <h2>${escapeHtml(env.APP_NAME)}</h2>
-      <p>Hello ${escapeHtml(input.name)},</p>
-      <h3>${escapeHtml(input.heading)}</h3>
-      <p>We have confirmed this transaction. Here is your receipt:</p>
-      <table style="width:100%;border-collapse:collapse">
-        ${detailRows}
-        <tr><td style="padding:12px;border-top:1px solid #dce5de;font-weight:700">${escapeHtml(input.amountLabel)}</td><td style="padding:12px;border-top:1px solid #dce5de;text-align:right;font-weight:700">${formatNaira(input.amountPaidKobo)}</td></tr>
-      </table>
-      <p>If you have questions about this payment, contact our support team.</p>
-    </div>
-  `;
+  return renderBrandedEmail({
+    preheader: `Payment confirmed: ${formatNaira(input.amountPaidKobo)}.`,
+    eyebrow: "PAYMENT RECEIPT",
+    heading: input.heading,
+    greetingName: input.name,
+    intro: "Your transaction is confirmed. Here is a summary for your records.",
+    contentHtml: `${renderEmailHighlight(input.amountLabel, formatNaira(input.amountPaidKobo))}${renderEmailDetails(input.details)}`,
+    footerNote: "If this payment looks unfamiliar, contact the Community Connect support team through the app.",
+  });
 };
 
 export const sendPaymentReceiptEmail = async (input: PaymentReceiptEmailInput): Promise<void> => {
